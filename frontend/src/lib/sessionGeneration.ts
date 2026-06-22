@@ -184,61 +184,92 @@ function conversationDisplayId(sessions: TraceSession[], conversationId: string)
 }
 
 /**
- * Groups CLI sessions by their cc_session_id (conversation identity).
+ * Groups CLI sessions by a machine-aware composite key derived from conversation_id
+ * (resume-stable transcript filename stem), falling back to cc_session_id then s.id.
  *
  * Behaviour:
- * - Sessions with a non-null cc_session_id are grouped by that id across base
- *   boundaries. A resume (two bases with the same cc_session_id) becomes ONE group
- *   with two sessions.
- * - Sessions with a null/empty cc_session_id are each their own standalone group
- *   (singleton; conversation_id = session.id, conversationRow = null).
- * - Cost/counts come from the matching BudgetConversationRow (keyed by conversation_id);
- *   if no row is found (older backend), conversationRow is null.
- * - Groups are ordered by their first session's position in the input array (preserves
- *   server sort order for each conversation's lead session).
+ * - conversation_id (if non-empty) is the primary grouping identity. It is stable
+ *   across /resume (which assigns a new cc_session_id). Two sessions with the same
+ *   conversation_id AND the same machine_id are ONE group (resume continuity).
+ * - machine_id is included in the bucket key so that two different machines that
+ *   happen to share the same conversation_id are kept in separate groups.
+ * - Null/empty machine_id is treated as an empty sentinel: legacy/null-machine
+ *   sessions with the same conversation_id still merge into ONE group.
+ * - The emitted ConversationGroup.conversation_id field is the conversation component
+ *   ALONE (not the composite), so convRowMap.get(conversation_id) still matches
+ *   BudgetConversationRow.conversation_id from the backend by_conversation rollup.
+ * - Sessions with a null/empty conversation_id fall back to cc_session_id (backward
+ *   compat), then to s.id (idless singleton).
  * - Label is "Cron run" when ALL members are cron sessions; otherwise "Conversation".
+ * - Groups are ordered by the first session's position in the input array (preserves
+ *   server sort order for each conversation's lead session).
  *
  * When byConversationRows is empty (older server without by_conversation), the function
- * still groups by cc_session_id (spend/counts will be null). Callers may check whether
- * any conversationRow is present to decide whether to display cost.
+ * still groups correctly (spend/counts will be null). Callers may check whether any
+ * conversationRow is present to decide whether to display cost.
  */
 export function buildConversationGroups(
   sessions: TraceSession[],
   byConversationRows: BudgetConversationRow[],
 ): ConversationGroup[] {
   // Build a quick lookup from conversation_id -> BudgetConversationRow.
+  // Keyed by the conversation component alone (matches backend by_conversation row key).
   const convRowMap = new Map<string, BudgetConversationRow>();
   for (const row of byConversationRows) {
     convRowMap.set(row.conversation_id, row);
   }
 
-  // Group sessions by cc_session_id. Idless sessions each get their own bucket.
-  const orderedKeys: string[] = [];           // insertion-order conversation ids
+  // Group sessions by a machine-aware composite bucket key.
+  // convComponent = conversation_id ?? cc_session_id ?? s.id (backend fallback order).
+  // machineComponent = machine_id when non-empty, else '' (null/empty -> no-fragment sentinel).
+  // bucketKey = machineComponent + ' ' + convComponent (space cannot appear in uuid/hex ids).
+  // The emitted conversation_id is convComponent ALONE (for convRowMap lookup).
+  const orderedBucketKeys: string[] = [];           // insertion-order bucket keys
   const buckets = new Map<string, TraceSession[]>();
+  const bucketToConvComponent = new Map<string, string>(); // bucketKey -> convComponent
 
   for (const s of sessions) {
+    const convId = s.conversation_id ?? null;
     const ccId = s.cc_session_id ?? null;
-    // Idless sessions are standalone: group key = session id (unique per session).
-    const key: string = (ccId !== null && ccId !== '') ? ccId : s.id;
-    let bucket = buckets.get(key);
+
+    // Mirror backend fallback: conversation_id (if non-empty) else cc_session_id (if non-empty) else s.id.
+    const convComponent: string =
+      (convId !== null && convId !== '')
+        ? convId
+        : (ccId !== null && ccId !== '')
+          ? ccId
+          : s.id;
+
+    // Null/empty machine_id -> empty sentinel so legacy rows don't fragment.
+    const machineComponent = s.machine_id ?? '';
+
+    // Idless singleton guard: when convComponent is s.id (fallback), every session gets
+    // a unique bucket regardless of machine_id (s.id is already unique per session).
+    // For non-singleton paths the composite key provides cross-machine isolation.
+    const bucketKey = `${machineComponent} ${convComponent}`;
+
+    let bucket = buckets.get(bucketKey);
     if (bucket === undefined) {
       bucket = [];
-      orderedKeys.push(key);
-      buckets.set(key, bucket);
+      orderedBucketKeys.push(bucketKey);
+      buckets.set(bucketKey, bucket);
+      bucketToConvComponent.set(bucketKey, convComponent);
     }
     bucket.push(s);
   }
 
   // Build result in insertion order.
   const result: ConversationGroup[] = [];
-  for (const key of orderedKeys) {
-    const members = buckets.get(key) ?? [];
+  for (const bucketKey of orderedBucketKeys) {
+    const members = buckets.get(bucketKey) ?? [];
+    const convComponent = bucketToConvComponent.get(bucketKey) ?? bucketKey;
     const allCron = members.length > 0 && members.every(isCronSession);
     const label: ConversationLabel = allCron ? 'Cron run' : 'Conversation';
-    const convRow = convRowMap.get(key) ?? null;
-    const displayId = conversationDisplayId(members, key);
+    // convRowMap is keyed by convComponent alone (matches BudgetConversationRow.conversation_id).
+    const convRow = convRowMap.get(convComponent) ?? null;
+    const displayId = conversationDisplayId(members, convComponent);
     result.push({
-      conversation_id: key,
+      conversation_id: convComponent,
       conversationRow: convRow,
       sessions: members,
       label,

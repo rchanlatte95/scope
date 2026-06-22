@@ -93,6 +93,21 @@ export interface TraceSession {
    * Added T-2026-06-19-04 (universal-cc backend).
    */
   cc_session_id?: string | null;
+  /**
+   * The transcript filename stem (conversation_id from the backend).
+   * RESUME-STABLE: survives a /resume which assigns a new cc_session_id.
+   * The correct grouping identity for conversation-level bucketing.
+   * Null for idless/legacy sessions or hosts that do not emit a conversation id.
+   * WhenWritingNull: omitted when null; arrives as `undefined`.
+   */
+  conversation_id?: string | null;
+  /**
+   * Locally-minted machine identity. Paired with conversation_id for cross-machine
+   * correctness: two machines may share the same conversation_id by coincidence.
+   * Null for sessions captured before machine_id was available.
+   * WhenWritingNull: omitted when null; arrives as `undefined`.
+   */
+  machine_id?: string | null;
   /** WhenWritingNull: omitted when null; arrives as `undefined`. */
   agent_subtype?: string | null;
   /** WhenWritingNull: omitted when null; arrives as `undefined`. */
