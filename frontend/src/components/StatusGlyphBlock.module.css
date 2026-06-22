@@ -1,0 +1,125 @@
+/*
+ * StatusGlyphBlock.module.css (T-2026-06-14-16b)
+ *
+ * Solid status-colored square holding a status glyph.
+ * Leads a plain square card as the status language for alert/status panels.
+ *
+ * Token pairing for glyph contrast (WCAG AA):
+ *   Light theme: status tokens are dark saturated colors; white glyph reads AA.
+ *     success  #08724C bg → white (#FFFBF1 ≈ white) glyph  ≈ 4.7:1  ✓
+ *     warning  #835000 bg → white glyph                    ≈ 4.7:1  ✓
+ *     danger   #A33A32 bg → white glyph                    ≈ 4.8:1  ✓
+ *     info     #0A5A93 bg → white glyph                    ≈ 5.3:1  ✓
+ *   Dark theme: status tokens are light/pastel colors; dark bg glyph reads AA.
+ *     success  #67D39F bg → dark (#0E1110) glyph           ≈ 8.6:1  ✓
+ *     warning  #F0B75D bg → dark glyph                     ≈ 10.2:1 ✓
+ *     danger   #FF9389 bg → dark glyph                     ≈ 10.4:1 ✓
+ *     info     #8BCBFF bg → dark glyph                     ≈ 12.1:1 ✓
+ *
+ * Glyph color: --scope-color-glyph-on-status (defined per theme below).
+ * Square corners: --scope-radius-none (0).
+ * Size: --scope-space-8 (32px) × --scope-space-8; scales at 200% text zoom.
+ * No raw hex; uses --scope-color-* semantic tokens only.
+ *
+ * Layout helper: .statusCard is a flex row that composes the block with content.
+ */
+
+/* ---------------------------------------------------------------------------
+   Per-theme glyph color: white in light (status bg is dark), dark in dark theme
+   (status bg is light). These are anonymous custom properties scoped here so
+   they don't pollute global scope; see :root block in index.css for the source
+   tokens they reference.
+   --------------------------------------------------------------------------- */
+
+:root,
+[data-theme="light"] {
+  --scope-glyph-on-status: var(--scope-color-surface-raised);  /* ≈ #FFFFFF */
+}
+
+[data-theme="dark"] {
+  --scope-glyph-on-status: var(--scope-color-bg);              /* ≈ #0E1110 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  [data-theme="system"] {
+    --scope-glyph-on-status: var(--scope-color-bg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   .block — the solid status-colored square
+   --------------------------------------------------------------------------- */
+
+.block {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--scope-space-8);        /* 32px */
+  height: var(--scope-space-8);       /* 32px */
+  border-radius: var(--scope-radius-none);
+  color: var(--scope-glyph-on-status);
+  /* Default (neutral) fill — overridden by data-status-token below */
+  background-color: var(--scope-color-text-muted);
+}
+
+/* Status token attribute selectors — maps semantic status to solid fill */
+.block[data-status-token="success"] {
+  background-color: var(--scope-color-success);
+}
+
+.block[data-status-token="warning"] {
+  background-color: var(--scope-color-warning);
+}
+
+.block[data-status-token="danger"] {
+  background-color: var(--scope-color-danger);
+}
+
+.block[data-status-token="info"] {
+  background-color: var(--scope-color-info);
+}
+
+.block[data-status-token="neutral"] {
+  background-color: var(--scope-color-text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   .glyph — icon wrapper inside the block
+   --------------------------------------------------------------------------- */
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--scope-space-4);   /* 16px */
+  height: var(--scope-space-4);  /* 16px */
+}
+
+.glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+   .statusCard — layout helper: glyph-block leading a plain square card.
+   Apply this class to the CONTAINER that holds both the block and the content.
+   The card itself stays unstyled (plain square, no fill) so consumers control
+   their own borders/backgrounds.
+   --------------------------------------------------------------------------- */
+
+.statusCard {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-radius: var(--scope-radius-none);
+}
+
+/* The content area sits beside the glyph block. */
+.statusCardContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  line-height: var(--scope-line-height-normal);
+}

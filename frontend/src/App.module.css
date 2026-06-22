@@ -1,0 +1,246 @@
+/* App shell layout (FE-2a + T-2026-06-20-10 mobile nav compaction).
+   Desktop (>=769px): persistent left rail (semantic <nav>) + content column.
+   Mobile (<=768px): compact top bar with brand + "Menu" disclosure toggle.
+   Canonical primary mobile/desktop breakpoint: 768px (max-width: 768px).
+   Each routed view owns its own PageHeader; the shell provides no title/subtitle.
+   Focus styles live globally in index.css. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100%;
+  background-color: var(--scope-color-bg);
+}
+
+/* Skip link: visually hidden until focused, then pinned top-left over everything. */
+.skipLink {
+  position: absolute;
+  left: 8px;
+  top: -56px;
+  z-index: 100;
+  padding: 10px 16px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  border: 1px solid var(--scope-color-border);
+  color: var(--scope-color-text);
+  font-size: 14px;
+  text-decoration: none;
+  transition: top 0.12s ease;
+}
+
+.skipLink:focus {
+  top: 8px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 12px;
+  background-color: var(--scope-color-surface);
+  border-right: 1px solid var(--scope-color-border);
+}
+
+/* railHeader: on desktop the brand sits alone in a flex column (no sibling
+   menu button visible). On mobile it becomes a row: brand left, menu button right.
+   The .menuToggle is hidden on desktop via display:none below the media query. */
+.railHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--scope-space-2);
+}
+
+/* Brand mark — a real link to #/command so the Scope mark returns to home.
+   Contains <ScopeLogo> (icon) + the "Scope" wordmark text. Focus ring is on
+   this container via the global :focus-visible rule in index.css (solid
+   scope-focus-ring, 3px / 3px). min-height 44px satisfies the WCAG 2.2 AA
+   touch-target requirement. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  padding: 6px 8px;
+  border-radius: var(--scope-radius-none);
+  text-decoration: none;
+  min-height: 44px;
+}
+
+/* "Scope" wordmark beside the mark. Uses the UI font + product ink; sits to the
+   right of the icon. The link's accessible name is still 'Scope' (aria-label). */
+.wordmark {
+  font-size: var(--scope-font-size-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--scope-color-text);
+  line-height: 1;
+}
+
+.brand:hover {
+  background-color: var(--scope-color-surface-raised);
+}
+
+/* Menu toggle button: only visible on mobile (<=768px).
+   Hidden by default (desktop); revealed in the mobile media query below.
+   Sharp geometry (radius-none), 44px min target, semantic tokens only. */
+.menuToggle {
+  display: none;
+  align-items: center;
+  gap: var(--scope-space-1);
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px;
+  background: none;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  color: var(--scope-color-text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menuToggle:hover {
+  background-color: var(--scope-color-surface-raised);
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: var(--scope-radius-none);
+  border: 1px solid transparent;
+  color: var(--scope-color-text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.navLink:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface-raised);
+}
+
+/* Active item: INVERSE FILL BLOCK (--scope-color-selected-bg / --scope-color-selected-text).
+   AA-verified in both themes: white on #1F4BDB = 6.8:1 (light), white on #2E55E6 = 6.0:1 (dark).
+   No left accent stripe (that is the AI-app house tell). Never color alone: text + fill block. */
+.navLinkActive {
+  background-color: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+  border-color: transparent;
+}
+
+.navGlyph {
+  font-size: 16px;
+  width: 18px;
+  text-align: center;
+  /* SVG glyphs inside this slot are display:block and use currentColor via
+     .navSvgGlyph below. String glyphs inherit the text-align/width above. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Inline SVG nav glyph (T-2026-06-21-01).
+   Renders at 18px × 18px, currentColor, display:block so it sits flush in the
+   flex row alongside the label text. The SVG itself carries aria-hidden and
+   focusable="false"; currentColor adapts to active inverse-fill, hover, focus,
+   light theme, and dark theme automatically via the cascade. */
+.navSvgGlyph {
+  display: block;
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+  flex-shrink: 0;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-left: var(--scope-space-8);
+  padding-right: var(--scope-space-8);
+  padding-bottom: var(--scope-space-4);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* =============================================================================
+   Mobile nav compaction (T-2026-06-20-10)
+   Below 768px (<=768px): collapse from a persistent left rail into a compact
+   top-bar disclosure. The rail stacks above content (single-column grid). The
+   brand and Menu toggle button are shown in a row. The nav list is hidden by
+   default and revealed when .navListOpen is applied by the React state toggle.
+   Desktop layout (>=769px) is unchanged: navList is always visible via the
+   default flex-column column styles above; .menuToggle stays display:none.
+   Canonical primary mobile/desktop breakpoint: max-width: 768px.
+   ============================================================================= */
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .rail {
+    border-right: none;
+    border-bottom: 1px solid var(--scope-color-border);
+    /* Remove the vertical gap between railHeader and navList when list is
+       closed; gap only shows when the list is expanded (navListOpen present). */
+    gap: 0;
+    padding-bottom: 0;
+  }
+
+  .railHeader {
+    padding-bottom: var(--scope-space-2);
+  }
+
+  /* Show the Menu toggle on mobile. */
+  .menuToggle {
+    display: flex;
+  }
+
+  /* Nav list hidden by default on mobile (disclosure pattern).
+     When closed: zero height + hidden overflow so it takes no space.
+     Using visibility:hidden + height:0 rather than display:none so focus
+     management works cleanly (hidden elements cannot receive focus anyway). */
+  .navList {
+    visibility: hidden;
+    height: 0;
+    overflow: hidden;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Expanded state: show the full list below the header bar.
+     padding-bottom gives breathing room before the content area. */
+  .navListOpen {
+    visibility: visible;
+    height: auto;
+    overflow: visible;
+    padding-bottom: var(--scope-space-2);
+  }
+}

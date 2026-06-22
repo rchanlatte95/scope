@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 200" role="img" aria-labelledby="title desc">
+  <title id="title">Scope mark polished dark padded</title>
+  <desc id="desc">Nested code delimiters forming deterministic guardrails around a semicolon terminator.</desc>
+  <path d="M92 20H74c-14 0-22 8-22 22v28c0 16-8 24-22 24v12c14 0 22 8 22 24v28c0 14 8 22 22 22h18v-20H78c-4 0-6-2-6-6v-34c0-12-6-20-18-20 12 0 18-8 18-20V46c0-4 2-6 6-6h14zM164 20h18c14 0 22 8 22 22v28c0 16 8 24 22 24v12c-14 0-22 8-22 24v28c0 14-8 22-22 22h-18v-20h14c4 0 6-2 6-6v-34c0-12 6-20 18-20-12 0-18-8-18-20V46c0-4-2-6-6-6h-14z" fill="#F2EDDF"/>
+  <path d="M115 49H89v102h26v-10H99V59h16zM141 49h26v102h-26v-10h16V59h-16z" fill="#F2EDDF"/>
+  <path d="M120 76h16v16h-16zM121 104h16v17l-8 15h-11l7-15h-4z" fill="#A7B6FF"/>
+</svg>

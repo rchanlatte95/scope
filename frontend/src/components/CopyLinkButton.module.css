@@ -1,0 +1,83 @@
+/*
+ * CopyLinkButton.module.css (ST-04 / T-2026-06-16-18)
+ *
+ * Wrapper + button for the "Copy link" affordance.
+ * Design contract (binding):
+ *  - Sharp + geometric: border-radius --scope-radius-sm (2px) on small controls.
+ *  - 4/8px spacing grid via --scope-space-* tokens.
+ *  - No raw hex. Semantic --scope-color-* tokens only.
+ *  - 44px minimum tap target (--scope-target-min).
+ *  - Visible focus in both themes via global :focus-visible (--scope-focus-ring).
+ *  - prefers-reduced-motion handled globally (transition-duration override).
+ */
+
+/* Wrapper: inline-flex so the live region is rendered but invisible. */
+.wrapper {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+/*
+ * The button itself.
+ *
+ * Resting state: secondary style — visible border, transparent background.
+ * Confirmed (aria-pressed=true): accent-bg fill to signal success without
+ * relying on color alone (the label text also changes to "Copied").
+ */
+.button {
+  /* 44px minimum tap target */
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-4);
+
+  /* Flat, bordered, secondary appearance */
+  background-color: transparent;
+  color: var(--scope-color-accent);
+  border: 1px solid var(--scope-color-accent);
+  border-radius: var(--scope-radius-sm);
+
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+
+  /* Smooth label swap respects prefers-reduced-motion (global override handles it). */
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+}
+
+/* Hover / active: slight accent-bg tint */
+.button:hover {
+  background-color: var(--scope-color-accent-bg);
+}
+
+.button:active {
+  background-color: var(--scope-color-accent-bg);
+}
+
+/* Confirmed state: inverse fill to reinforce the "Copied" text signal */
+.button[aria-pressed="true"] {
+  background-color: var(--scope-color-accent-bg);
+  color: var(--scope-color-accent);
+  border-color: var(--scope-color-accent);
+}
+
+/*
+ * Live region: visually hidden but readable by screen readers.
+ * Uses the standard SR-only pattern (not display:none, which would
+ * suppress announcements in some AT implementations).
+ */
+.liveRegion {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

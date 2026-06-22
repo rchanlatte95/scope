@@ -1,0 +1,30 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Bounded size (item 7): hard caps + scroll, never grows to cover the trace. */
+.bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  /* Extended to 480px to accommodate cost breakdown component lines (T-2026-06-15-11b).
+     Still bounded; overflow: auto allows scroll if content exceeds max-height. */
+  max-width: 480px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--scope-color-border);
+  /* Tooltip is a genuinely floating layer; keep shadow per contract. sm radius allowed. */
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: var(--scope-shadow-tooltip);
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none; /* the bubble itself never captures the cursor: cannot wedge open */
+}

@@ -1,0 +1,59 @@
+/*
+ * CostBillingClassBadge.module.css (T-2026-06-19-01 Phase 4)
+ *
+ * Design contract (binding, 2026-06-14):
+ *   - Status = text + shape/glyph + color, NEVER color alone (WCAG 1.4.1).
+ *   - --scope-color-* tokens only; NO raw hex.
+ *   - Corner radius: --scope-radius-sm (2px) — this is a small interactive/chip control.
+ *   - No left accent stripe.
+ *   - Lines (border) over shadows: 1px solid border, no box-shadow.
+ *   - 4/8px geometric spacing grid.
+ *
+ * Billing-class data attributes drive color:
+ *   data-billing="billed"  -> accent/info tone (a real charge — high-trust signal)
+ *   data-billing="shadow"  -> warning tone (reference cost, not an invoice)
+ *
+ * Both tones pair with text labels (never color alone) so the badge is readable
+ * in grayscale and by users with color vision differences.
+ *
+ * WCAG AA contrast:
+ *   - "Billed" (info): --scope-color-info on --scope-color-info-bg:
+ *       light #0A5A93 on #E3F2FF = ~5.4:1 (AA)
+ *       dark  #8BCBFF on #102B3F = ~5.0:1 (AA)
+ *   - "Would-be" (warning): --scope-color-warning on --scope-color-warning-bg:
+ *       light #835000 on #FFF1D7 = ~6.3:1 (AA)
+ *       dark  #F0B75D on #32240E = ~4.7:1 (AA)
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--scope-space-2);
+  border-radius: var(--scope-radius-sm);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  line-height: var(--scope-line-height-tight);
+  white-space: nowrap;
+  /* Lines over shadows */
+  border: 1px solid transparent;
+  /* No box-shadow — sharp and geometric */
+}
+
+/* "Billed" — info/accent tone: a real per-token charge (high confidence) */
+.badge[data-billing="billed"] {
+  color: var(--scope-color-info);
+  background-color: var(--scope-color-info-bg);
+  border-color: var(--scope-color-info);
+}
+
+/*
+ * "Would-be" — warning tone: reference cost, not an invoice.
+ * Warning conveys "this is approximate / not actual billing" without using
+ * danger (which would imply an error). The tooltip/aria carries the full
+ * honest distinction.
+ */
+.badge[data-billing="shadow"] {
+  color: var(--scope-color-warning);
+  background-color: var(--scope-color-warning-bg);
+  border-color: var(--scope-color-warning);
+}

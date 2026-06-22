@@ -1,0 +1,61 @@
+/*
+ * ToolTypeMark.module.css (FE-1)
+ *
+ * Per-event fill/stripe/glyph mark for a TraceToolType bucket.
+ * CONSTRAINT (FE-0b): --scope-trace-tool-* tokens only clear 3:1 on the
+ * CARD surface. Marks must render on a card-surface background, NOT on
+ * bg or surface-2. The parent component is responsible for placement on
+ * the correct surface; this module only handles the mark itself.
+ *
+ * Sanctioned consumers of --scope-trace-tool-* tokens:
+ *   ToolTypeMark, TraceLegend, TraceGraph, TraceTimeline (ONLY).
+ *
+ * Status owns operational meaning. A failed find event reads "failed" via
+ * StatusBadge — not via the find color. ToolTypeMark communicates tool TYPE
+ * only, never operational STATUS.
+ */
+
+/* The mark pill: a small colored swatch + glyph + optional label */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  line-height: var(--scope-line-height-tight);
+  font-weight: 500;
+}
+
+/* The color swatch (fill) */
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--scope-radius-none);
+  flex-shrink: 0;
+  /* color is set via inline style from the --scope-trace-tool-* token */
+}
+
+/* The glyph/icon */
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.glyph svg {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+
+/* Label text when shown */
+.label {
+  color: var(--scope-color-text-muted);
+  user-select: none;
+}
+
+/* Compact (no label) variant */
+.mark.compact .label {
+  display: none;
+}

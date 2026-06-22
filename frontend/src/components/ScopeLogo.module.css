@@ -1,0 +1,13 @@
+/* ScopeLogo — base image styles.
+   No raw hex; no color properties. The SVG assets carry their own colors.
+   This module only handles layout concerns (block display to eliminate inline
+   baseline gap, no shrink in flex containers). */
+
+.logo {
+  display: block;
+  flex-shrink: 0;
+  /* Preserve SVG aspect ratio: width is authoritative, height is intrinsic.
+     Prevents stretch distortion in flex containers where align-items: stretch
+     would otherwise force the image into a taller box. */
+  object-fit: contain;
+}

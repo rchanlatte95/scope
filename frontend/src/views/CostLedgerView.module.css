@@ -1,0 +1,602 @@
+/* =============================================================================
+   CostLedgerView — CSS module (T-05b Cost Ledger Explorer)
+   No raw hex. All colors via --scope-color-* or --scope-color-chart-* tokens.
+   ============================================================================= */
+
+/* Page layout */
+.page {
+  padding: var(--scope-space-6);
+  max-width: 1200px;
+}
+
+@media (max-width: 480px) {
+  .page {
+    padding: var(--scope-space-3);
+  }
+}
+
+/* Date range picker wrapper — sits between the PageHeader and the first section */
+.dateRangePicker {
+  margin-bottom: var(--scope-space-6);
+}
+
+/* Sections */
+.section {
+  margin-bottom: var(--scope-space-8);
+  background: var(--scope-color-surface);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  padding: var(--scope-space-6);
+}
+
+@media (max-width: 480px) {
+  .section {
+    padding: var(--scope-space-3);
+  }
+}
+
+.sectionHeading {
+  font-size: var(--scope-font-size-lg);
+  font-weight: 600;
+  color: var(--scope-color-text);
+  margin: 0 0 var(--scope-space-4) 0;
+}
+
+/* Provenance honesty panel */
+.provenancePanel {
+  margin-bottom: var(--scope-space-8);
+  background: var(--scope-color-surface);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  padding: var(--scope-space-6);
+}
+
+.provenancePanelHeading {
+  font-size: var(--scope-font-size-lg);
+  font-weight: 600;
+  color: var(--scope-color-text);
+  margin: 0 0 var(--scope-space-2) 0;
+}
+
+.provenancePanelSubtitle {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  margin: 0 0 var(--scope-space-4) 0;
+}
+
+.totalSpendRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--scope-space-3);
+  margin-bottom: var(--scope-space-4);
+  flex-wrap: wrap;
+}
+
+.totalSpendLabel {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-weight: 600;
+}
+
+.totalSpendValue {
+  font-size: var(--scope-font-size-xl);
+  font-weight: 700;
+  color: var(--scope-color-text);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+}
+
+.totalSpendNull {
+  font-size: var(--scope-font-size-xl);
+  font-weight: 700;
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+}
+
+/* Coverage text */
+.coverageText {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  margin-bottom: var(--scope-space-4);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Provenance breakdown table */
+.provenanceTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--scope-font-size-sm);
+}
+
+.provenanceTable caption {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  text-align: left;
+  margin-bottom: var(--scope-space-2);
+  caption-side: top;
+}
+
+.provenanceTable th,
+.provenanceTable td {
+  padding: var(--scope-space-2) var(--scope-space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.provenanceTable th {
+  font-weight: 600;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--scope-color-surface-2);
+}
+
+.provenanceTable td:nth-child(2),
+.provenanceTable td:nth-child(3) {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  text-align: right;
+}
+
+.provenanceTable th:nth-child(2),
+.provenanceTable th:nth-child(3) {
+  text-align: right;
+}
+
+/* Chart container */
+.chartContainer {
+  width: 100%;
+  position: relative;
+  z-index: 0;
+  overflow: visible;
+}
+
+.chartContainer:hover,
+.chartContainer:focus-within {
+  z-index: 50;
+}
+
+/* Chart + table layout: chart above table (stacked) */
+.chartAndTable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-4);
+}
+
+/* Table fallback */
+.tableContainer {
+  overflow-x: auto;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--scope-font-size-sm);
+}
+
+.dataTable caption {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  text-align: left;
+  margin-bottom: var(--scope-space-2);
+  caption-side: top;
+}
+
+.dataTable th,
+.dataTable td {
+  padding: var(--scope-space-2) var(--scope-space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.dataTable th {
+  font-weight: 600;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--scope-color-surface-2);
+  white-space: nowrap;
+}
+
+.dataTable td:not(:first-child) {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  text-align: right;
+}
+
+.dataTable th:not(:first-child) {
+  text-align: right;
+}
+
+.dataTable tbody tr:hover {
+  background: var(--scope-color-surface-2);
+}
+
+/* Top-N truncation notice */
+.truncationNotice {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  margin-top: var(--scope-space-2);
+}
+
+/* Loading skeleton */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-4);
+}
+
+.skeletonBlock {
+  background: var(--scope-color-surface-2);
+  border-radius: var(--scope-radius-none);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonBlock {
+    animation: none;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Error state */
+.errorState {
+  padding: var(--scope-space-6);
+  background: var(--scope-color-danger-bg);
+  border: 1px solid var(--scope-color-danger);
+  border-radius: var(--scope-radius-none);
+  color: var(--scope-color-danger);
+}
+
+.errorHeading {
+  font-weight: 600;
+  margin: 0 0 var(--scope-space-2) 0;
+}
+
+.errorMessage {
+  font-size: var(--scope-font-size-sm);
+  margin: 0 0 var(--scope-space-3) 0;
+}
+
+.retryButton {
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-4);
+  background: var(--scope-color-surface);
+  border: 1px solid var(--scope-color-danger);
+  border-radius: var(--scope-radius-sm);
+  color: var(--scope-color-danger);
+  cursor: pointer;
+  font-size: var(--scope-font-size-sm);
+}
+
+.retryButton:hover {
+  background: var(--scope-color-danger-bg);
+}
+
+/* Empty state / zero spend */
+.emptySection {
+  padding: var(--scope-space-4);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+}
+
+/* Chip-style provenance label inline with total */
+.provenanceChipInline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+}
+
+/* Date range */
+.dateRange {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  margin-bottom: var(--scope-space-4);
+}
+
+/* Accessibility: visually hidden but screen reader accessible */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Tool-type legend */
+.toolTypeLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--scope-space-3);
+  margin-bottom: var(--scope-space-4);
+}
+
+.toolTypeLegendItem {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  font-size: var(--scope-font-size-sm);
+  min-height: var(--scope-target-min);
+}
+
+.toolTypeLegendSwatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  /* Color is set via inline style using --scope-trace-tool-* token */
+}
+
+.toolTypeLegendLabel {
+  color: var(--scope-color-text);
+  font-weight: 500;
+}
+
+.toolTypeLegendValue {
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  margin-left: var(--scope-space-1);
+}
+
+/* Tool-type section subtitle */
+.toolTypeSectionSubtitle {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  margin: 0 0 var(--scope-space-4) 0;
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Reflow at 320px: legend wraps, legend items stack */
+@media (max-width: 320px) {
+  .toolTypeLegendItem {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+/* Export button row above a table — right-aligns the button, stays in flow */
+.tableExportRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--scope-space-2);
+}
+
+/* ---- chart tooltip overlay (ST-04) ---- */
+
+/**
+ * Positioned HTML tooltip overlay rendered inside a position:relative chart wrapper.
+ * Floats above the SVG via z-index. Bounded size prevents covering large chart areas.
+ * pointer-events:none so it never blocks mouse events on the underlying SVG elements.
+ * prefers-reduced-motion: no transition (opacity) so the tooltip appears/disappears instantly.
+ */
+.chartTooltip {
+  position: absolute;
+  z-index: 100;
+  max-width: 280px;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  background: var(--scope-color-surface-raised);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  box-shadow: var(--scope-shadow-tooltip);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-xs);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  line-height: var(--scope-line-height-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chartTooltip {
+    /* Subtle fade-in so sudden appearance is less jarring */
+    animation: chart-tooltip-fadein 0.1s ease-out;
+  }
+}
+
+@keyframes chart-tooltip-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ---- known/assumed breakdown note (T-2026-06-16-06) ---- */
+.knownAssumedNote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-sm);
+}
+
+.knownBucket {
+  color: var(--scope-color-text);
+}
+
+.assumedBucket {
+  color: var(--scope-color-text-muted);
+}
+
+.assumedInfoNote {
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+}
+
+/* =============================================================================
+   Breakdown tab bar (ST-03 — URL view-state wiring)
+
+   Design contract (owner, 2026-06-14):
+   - Active tab = INVERSE FILL BLOCK (--scope-color-selected-bg / -text).
+     No left accent stripe.
+   - Inactive = surface background with border, hover = surface-2.
+   - Corner radius: --scope-radius-sm (2px) on the individual tab buttons only.
+   - 4/8px spacing grid. Min-height 44px for touch targets.
+   ============================================================================= */
+
+.breakdownTabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: var(--scope-space-4);
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  overflow-x: auto;
+}
+
+/* Shared tab button base */
+.breakdownTab,
+.breakdownTabActive {
+  /* 44px min touch/click target */
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-4);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 500;
+  border: 1px solid transparent;
+  border-bottom: none;
+  cursor: pointer;
+  white-space: nowrap;
+  /* Sharp geometry — only radius-sm on small interactive controls */
+  border-radius: var(--scope-radius-sm) var(--scope-radius-sm) 0 0;
+  transition: none;
+  /* Override any UA button styles */
+  font-family: inherit;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Inactive tab */
+.breakdownTab {
+  background: var(--scope-color-surface);
+  color: var(--scope-color-text-muted);
+  border-color: transparent;
+}
+
+.breakdownTab:hover {
+  background: var(--scope-color-surface-2);
+  color: var(--scope-color-text);
+}
+
+.breakdownTab:focus-visible {
+  outline: 3px solid var(--scope-color-focus-ring);
+  outline-offset: -3px;
+}
+
+/* Active tab — INVERSE FILL BLOCK (selected = inverse fill, not left stripe) */
+.breakdownTabActive {
+  background: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+  border-color: var(--scope-color-border-subtle);
+  border-bottom-color: var(--scope-color-selected-bg);
+  /* Visually connects active tab to the panel below */
+  margin-bottom: -1px;
+}
+
+.breakdownTabActive:focus-visible {
+  outline: 3px solid var(--scope-color-focus-ring);
+  outline-offset: -3px;
+}
+
+/* Reflow: single-row wraps to two-row on very narrow screens */
+@media (max-width: 480px) {
+  .breakdownTabBar {
+    gap: var(--scope-space-1);
+    border-bottom: none;
+  }
+
+  .breakdownTab,
+  .breakdownTabActive {
+    border-radius: var(--scope-radius-sm);
+    border: 1px solid var(--scope-color-border-subtle);
+  }
+
+  .breakdownTabActive {
+    margin-bottom: 0;
+  }
+}
+
+/* =============================================================================
+   Agent row selection (ST-03 — selected agent = inverse fill, no left stripe)
+   ============================================================================= */
+
+/* Selectable (unselected) row — hover and cursor cues */
+.agentRowSelectable {
+  cursor: pointer;
+}
+
+.agentRowSelectable:hover {
+  background: var(--scope-color-surface-2);
+}
+
+.agentRowSelectable:focus-visible {
+  outline: 3px solid var(--scope-color-focus-ring);
+  outline-offset: -2px;
+}
+
+/* Selected row — INVERSE FILL BLOCK (design contract: no left accent stripe) */
+.agentRowSelected {
+  background: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+  cursor: pointer;
+}
+
+.agentRowSelected td {
+  color: var(--scope-color-selected-text);
+}
+
+.agentRowSelected:focus-visible {
+  outline: 3px solid var(--scope-color-focus-ring);
+  outline-offset: -2px;
+}
+
+/* Agent filter banner — shown when an agent row is selected (above the table) */
+.agentFilterBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-2) var(--scope-space-4);
+  margin-bottom: var(--scope-space-4);
+  background: var(--scope-color-selected-bg);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-sm);
+  flex-wrap: wrap;
+}
+
+.agentFilterLabel {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-selected-text);
+  flex: 1;
+}
+
+.agentFilterClear {
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-3);
+  background: var(--scope-color-surface);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-xs);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.agentFilterClear:hover {
+  background: var(--scope-color-surface-2);
+}
+
+.agentFilterClear:focus-visible {
+  outline: 3px solid var(--scope-color-focus-ring);
+  outline-offset: -2px;
+}

@@ -1,0 +1,205 @@
+/*
+ * AffectedTestsTable.module.css (PP-08a, Proof Paths)
+ *
+ * Affected-tests evidence table. This table leads (strongest evidence).
+ *
+ * Design contract (CLAUDE.md, scope_frontend_design_doc.md):
+ *   - --scope-* tokens only; no raw hex.
+ *   - Sharp corners (--scope-radius-none = 0); 4/8px grid.
+ *   - Status = text + shape + color (never color alone).
+ *   - 44px minimum touch targets for interactive controls.
+ *   - True light/dark via data-theme tokens.
+ */
+
+/* ---------------------------------------------------------------------------
+   .section — outer wrapper
+   --------------------------------------------------------------------------- */
+
+.section {
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  background: var(--scope-color-surface);
+}
+
+/* ---------------------------------------------------------------------------
+   .sectionHeader — title + explanatory note
+   --------------------------------------------------------------------------- */
+
+.sectionHeader {
+  padding: var(--scope-space-3) var(--scope-space-4);
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--scope-space-1) 0;
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  color: var(--scope-color-text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sectionNote {
+  margin: 0;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* ---------------------------------------------------------------------------
+   .emptyMessage — section-local empty sub-state (EDGE-UX-4)
+   --------------------------------------------------------------------------- */
+
+.emptyMessage {
+  margin: 0;
+  padding: var(--scope-space-8) var(--scope-space-4);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-style: italic;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   .capNotice — indirect-test cap disclosure (EDGE-DATA-2)
+   --------------------------------------------------------------------------- */
+
+.capNotice {
+  margin: 0;
+  padding: var(--scope-space-2) var(--scope-space-4);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-warning);
+  background: var(--scope-color-warning-bg);
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* ---------------------------------------------------------------------------
+   .tierCell — confidence tier: glyph + label + raw number
+   Status = text + shape + color, never color alone (EDGE-A11Y-1, OQ-8).
+   --------------------------------------------------------------------------- */
+
+.tierCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  white-space: nowrap;
+}
+
+.tierGlyph {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-accent);
+  flex-shrink: 0;
+  /* Shape token: glyph carries non-color meaning (WCAG 2.2 rule) */
+}
+
+.tierLabel {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+}
+
+.confidenceRaw {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--scope-color-text);
+  padding: 0 var(--scope-space-1);
+  border: 1px solid var(--scope-color-border-subtle);
+  background: var(--scope-color-surface-2);
+  /* No border-radius: sharp design (corner radius 0 by default) */
+  border-radius: var(--scope-radius-none);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   .displayName — test display_name cell
+   --------------------------------------------------------------------------- */
+
+.displayName {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------------
+   .pathLength — numeric path length in the Length column
+   --------------------------------------------------------------------------- */
+
+.pathLength {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--scope-color-text-muted);
+  text-align: right;
+  display: block;
+}
+
+/* ---------------------------------------------------------------------------
+   .symbolId — full FQN in the ID column (truncated + title for full text)
+   --------------------------------------------------------------------------- */
+
+.symbolId {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  max-width: 24ch;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* ---------------------------------------------------------------------------
+   .disclosureBar — "Showing N of M" + "show all" expander (EDGE-DATA-2)
+   --------------------------------------------------------------------------- */
+
+.disclosureBar {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-2) var(--scope-space-4);
+  border-top: 1px solid var(--scope-color-border-subtle);
+  background: var(--scope-color-surface);
+  flex-wrap: wrap;
+}
+
+.disclosureCount {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  flex-shrink: 0;
+}
+
+/* "Show all" button: 44px minimum touch target (--scope-target-min),
+   sharp with --scope-radius-sm (2px) for small interactive controls. */
+.showAllBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-1) var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background: var(--scope-color-surface);
+  color: var(--scope-color-accent);
+  font-size: var(--scope-font-size-xs);
+  font-family: var(--scope-font-sans);
+  cursor: pointer;
+  flex-shrink: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.showAllBtn:hover {
+  background: var(--scope-color-accent-bg);
+  color: var(--scope-color-accent);
+  border-color: var(--scope-color-accent);
+}
+
+.showAllBtn:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}

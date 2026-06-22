@@ -1,0 +1,200 @@
+/*
+ * Pagination.module.css — Styles for the reusable Pagination component.
+ *
+ * Design contract (scope_frontend_design_doc.md + T-2026-06-17-03):
+ * - Semantic tokens only (--scope-*). No raw hex values.
+ * - border-radius: 0 default; --scope-radius-sm (2px) on small interactive controls.
+ * - 4/8px spacing grid.
+ * - 44px minimum touch targets (--scope-target-min) on nav/page buttons.
+ * - Visible :focus-visible in both light and dark themes.
+ * - Reflows at 320px (controls wrap / stack vertically).
+ * - No shadows; lines over shadows.
+ */
+
+/* Root nav element — wraps summary + controls row. */
+.pagination {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-2); /* 8px */
+  width: 100%;
+  padding: var(--scope-space-2) 0;
+}
+
+/* Summary line ("Showing X–Y of N · page P of M"). */
+.summary {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-variant-numeric: tabular-nums;
+  /* min-height so AT live region is visible even when loading */
+  min-height: 1lh;
+}
+
+/* Controls row: prev, page buttons, next, size selector. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--scope-space-1); /* 4px */
+}
+
+/* Prev / Next navigation buttons. */
+.navBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--scope-space-1);
+  height: var(--scope-target-min, 44px);
+  min-width: var(--scope-target-min, 44px);
+  padding: 0 var(--scope-space-2);
+  background: var(--scope-color-surface-2);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm); /* 2px per design system */
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  /* Lines over shadows */
+  box-shadow: none;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.navBtn:hover:not(:disabled) {
+  background: var(--scope-color-surface-raised);
+  border-color: var(--scope-color-text-muted);
+}
+
+.navBtn:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.navBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Small text label inside prev/next buttons. */
+.navBtnText {
+  font-size: var(--scope-font-size-sm);
+}
+
+/* Page button group. */
+.pageButtons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--scope-space-1);
+}
+
+/* Individual page number buttons. */
+.pageBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--scope-target-min, 44px);
+  min-width: var(--scope-target-min, 44px);
+  padding: 0 var(--scope-space-2);
+  background: var(--scope-color-surface-2);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: none;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: var(--scope-color-surface-raised);
+  border-color: var(--scope-color-text-muted);
+}
+
+.pageBtn:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+/* Active/current page — inverse fill (selected = inverse fill block per design contract). */
+.pageBtnActive {
+  background: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+  border-color: var(--scope-color-selected-bg);
+  cursor: default;
+}
+
+.pageBtnActive:disabled {
+  opacity: 1; /* active page is disabled but must remain visually prominent */
+}
+
+/* Ellipsis placeholder between page buttons. */
+/* Page-size selector label. */
+.sizeLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  margin-left: auto; /* push to the right */
+  cursor: pointer;
+}
+
+/* "Per page" label text. */
+.sizeLabelText {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+}
+
+/* Page-size <select>. */
+.sizeSelect {
+  height: var(--scope-target-min, 44px);
+  min-width: 72px;
+  padding: 0 var(--scope-space-2);
+  background: var(--scope-color-surface-2);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: none;
+  appearance: auto; /* keep native arrow for accessibility */
+}
+
+.sizeSelect:hover {
+  border-color: var(--scope-color-text-muted);
+}
+
+.sizeSelect:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+/* =====================================================================
+ * Narrow-viewport reflow (320px — WCAG 1.4.10 Reflow target)
+ * ===================================================================== */
+@media (max-width: 360px) {
+  /* Stack controls vertically so they don't overflow at 320px. */
+  .controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* Size selector loses the auto-margin at narrow widths. */
+  .sizeLabel {
+    margin-left: 0;
+  }
+
+  /* Page buttons can wrap freely. */
+  .pageButtons {
+    width: 100%;
+  }
+
+  /* Nav buttons take full width for easier touch targeting. */
+  .navBtn {
+    width: 100%;
+    justify-content: center;
+  }
+}

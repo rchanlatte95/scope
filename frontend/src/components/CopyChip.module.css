@@ -1,0 +1,45 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface);
+  color: var(--scope-color-text);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.chip:hover {
+  border-color: var(--scope-color-text-muted);
+  background-color: var(--scope-color-surface-raised);
+}
+
+/* --clr-id -> --scope-color-accent: identifier/ID chip accent (correct product token) */
+.id {
+  color: var(--scope-color-accent);
+}
+
+/* --clr-alias -> --scope-color-accent: alias is an identifier chip, not a warning callout.
+   The FE-0a shim interim-mapped --clr-alias to --scope-color-warning because the old hex
+   #ffb000 (amber) resembled amber/warning, but an alias is semantically an identifier.
+   Decision: use --scope-color-accent here. */
+.alias {
+  color: var(--scope-color-accent);
+}
+
+.value {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.hint {
+  color: var(--scope-color-text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

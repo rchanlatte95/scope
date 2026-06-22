@@ -1,0 +1,179 @@
+/* =============================================================================
+   DateRangePicker.module.css
+   scope-* tokens only. No raw hex. 4/8px grid. Sharp + geometric.
+   --scope-radius-sm (2px) on inputs and preset buttons only.
+   ============================================================================= */
+
+/* ---------------------------------------------------------------------------
+   Outer wrapper
+   --------------------------------------------------------------------------- */
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+  /* No background; callers apply surface tokens. */
+}
+
+/* ---------------------------------------------------------------------------
+   Preset segmented control (role=radiogroup)
+   --------------------------------------------------------------------------- */
+.presetGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--scope-space-1);
+}
+
+.presetLabel {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  margin-bottom: var(--scope-space-1);
+  display: block;
+}
+
+.presetButton {
+  /* 44px minimum target height */
+  min-height: var(--scope-target-min);
+  min-width: 44px;
+  padding: 0 var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  background: var(--scope-color-surface);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--scope-radius-sm);
+  line-height: var(--scope-line-height-tight);
+  white-space: nowrap;
+  /* No box-shadow; crisp 1px border per design contract. */
+  transition: none; /* prefers-reduced-motion: already handled globally */
+}
+
+.presetButton:hover {
+  background: var(--scope-color-surface-2);
+}
+
+.presetButton:focus-visible {
+  /* Inherits :focus-visible from index.css global rule */
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+/* Inverse fill block for selected preset (design contract: no left stripe) */
+.presetButtonActive {
+  background: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+  border-color: var(--scope-color-selected-bg);
+}
+
+.presetButtonActive:hover {
+  background: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+}
+
+/* ---------------------------------------------------------------------------
+   Custom range section
+   --------------------------------------------------------------------------- */
+.customSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-2);
+}
+
+.customRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--scope-space-3);
+}
+
+.customField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.fieldLabel {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-weight: 500;
+}
+
+.dateInput {
+  /* 44px target height */
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-2);
+  border: 1px solid var(--scope-color-border);
+  background: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-family: inherit;
+  border-radius: var(--scope-radius-sm);
+  box-sizing: border-box;
+  width: 100%;
+  /* colorscheme lets the native calendar picker match the current theme */
+  color-scheme: inherit;
+}
+
+.dateInput:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.dateInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Validation error message (text + shape, not color alone)
+   --------------------------------------------------------------------------- */
+.errorBlock {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--scope-space-2);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border: 1px solid var(--scope-color-danger);
+  background: var(--scope-color-danger-bg);
+  color: var(--scope-color-danger);
+  font-size: var(--scope-font-size-sm);
+  border-radius: var(--scope-radius-sm);
+}
+
+.errorGlyph {
+  /* Status glyph-block: solid colored square with glyph, NOT a left stripe */
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: var(--scope-font-size-sm);
+  /* aria-hidden; the error message text carries the meaning */
+}
+
+.errorText {
+  flex: 1;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------------
+   320px reflow: single-column stacking
+   --------------------------------------------------------------------------- */
+@media (max-width: 320px) {
+  .presetGroup {
+    flex-direction: column;
+  }
+
+  .presetButton {
+    width: 100%;
+    text-align: left;
+  }
+
+  .customRow {
+    flex-direction: column;
+  }
+
+  .customField {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+}

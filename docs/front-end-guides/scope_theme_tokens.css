@@ -1,0 +1,127 @@
+/* Scope MVP theme tokens
+   Use these variables as the only source of truth for color in React components.
+   Direct hex values outside this file should fail review.
+*/
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --scope-color-bg: #F6F1E7;
+  --scope-color-surface: #FFFBF1;
+  --scope-color-surface-2: #EAE1D1;
+  --scope-color-surface-raised: #FFFFFF;
+  --scope-color-text: #151916;
+  --scope-color-text-muted: #555F54;
+  --scope-color-border: #9C8F79;
+  --scope-color-border-subtle: #D9D0BE;
+  --scope-color-rail: #151A16;
+  --scope-color-rail-text: #F2EDDF;
+  --scope-color-rail-muted: #BAC3B5;
+
+  --scope-color-accent: #1F4BDB;
+  --scope-color-accent-bg: #E8EDFF;
+  /* Selected/active state (inverse fill block; replaces the left accent stripe). AA-verified:
+     white on this bg = 6.8:1 light, 6.0:1 dark. Saturated blue + white text in BOTH themes. */
+  --scope-color-selected-bg: #1F4BDB;
+  --scope-color-selected-text: #FFFFFF;
+  --scope-color-success: #08724C;
+  --scope-color-success-bg: #E1F4E9;
+  --scope-color-warning: #835000;
+  --scope-color-warning-bg: #FFF1D7;
+  --scope-color-danger: #A33A32;
+  --scope-color-danger-bg: #FFE7E5;
+  --scope-color-info: #0A5A93;
+  --scope-color-info-bg: #E3F2FF;
+
+  --scope-focus-ring: #151916;
+  --scope-focus-ring-offset: #FFFBF1;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --scope-color-bg: #0E1110;
+  --scope-color-surface: #171C18;
+  --scope-color-surface-2: #202720;
+  --scope-color-surface-raised: #1E251F;
+  --scope-color-text: #F2EDDF;
+  --scope-color-text-muted: #BAC3B5;
+  --scope-color-border: #60705F;
+  --scope-color-border-subtle: #344034;
+  --scope-color-rail: #101410;
+  --scope-color-rail-text: #F2EDDF;
+  --scope-color-rail-muted: #BAC3B5;
+
+  --scope-color-accent: #98AAFF;
+  --scope-color-accent-bg: #1F2948;
+  /* Selected/active state: saturated blue + white text (NOT the lighter dark accent, which fails
+     contrast under an inverse fill). white on #2E55E6 = 6.0:1 AA. */
+  --scope-color-selected-bg: #2E55E6;
+  --scope-color-selected-text: #FFFFFF;
+  --scope-color-success: #67D39F;
+  --scope-color-success-bg: #173024;
+  --scope-color-warning: #F0B75D;
+  --scope-color-warning-bg: #32240E;
+  --scope-color-danger: #FF9389;
+  --scope-color-danger-bg: #351A17;
+  --scope-color-info: #8BCBFF;
+  --scope-color-info-bg: #102B3F;
+
+  --scope-focus-ring: #F2EDDF;
+  --scope-focus-ring-offset: #171C18;
+}
+
+:root {
+  --scope-font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --scope-font-readable: "Atkinson Hyperlegible", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --scope-font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+
+  /* Shape: sharp + geometric (2026-06-14 direction). Default radius is 0; the ONLY non-zero radius
+     is --scope-radius-sm (2px), reserved for SMALL interactive controls (buttons, inputs, chips,
+     toggles). Cards, panels, modals, tables, charts, badges, and the shell are square. md/lg are
+     kept at 0 as legacy aliases so existing references resolve sharp; prefer --scope-radius-none. */
+  --scope-radius-none: 0;
+  --scope-radius-sm: 2px;   /* small interactive controls ONLY */
+  --scope-radius-md: 0;     /* legacy alias -> sharp; prefer --scope-radius-none */
+  --scope-radius-lg: 0;     /* legacy alias -> sharp; prefer --scope-radius-none */
+
+  /* Geometric spacing grid: 4px base, 8px major rhythm. Use these tokens only; no arbitrary px. */
+  --scope-space-1: 4px;
+  --scope-space-2: 8px;
+  --scope-space-3: 12px;
+  --scope-space-4: 16px;
+  --scope-space-5: 20px;
+  --scope-space-6: 24px;
+  --scope-space-8: 32px;
+
+  --scope-font-size-xs: 0.75rem;
+  --scope-font-size-sm: 0.875rem;
+  --scope-font-size-md: 1rem;
+  --scope-font-size-lg: 1.125rem;
+  --scope-font-size-xl: 1.5rem;
+  --scope-font-size-2xl: 2rem;
+
+  --scope-line-height-tight: 1.2;
+  --scope-line-height-normal: 1.5;
+
+  --scope-target-min: 44px;
+  --scope-focus-width: 3px;
+  --scope-focus-offset: 3px;
+}
+
+:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

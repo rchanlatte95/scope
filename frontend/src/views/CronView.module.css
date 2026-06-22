@@ -1,0 +1,1004 @@
+/* CronView styles — FE-3 migration onto contract.
+   All tokens are --scope-color-* product tokens or --scope-* space/font/radius tokens.
+   No raw hex. Dual-use --clr-* (--clr-edit/--clr-hook) are replaced by their correct
+   product semantic: accent for primary, danger for destructive, success for success feedback.
+   Status is always cued by text + shape + token, never color alone.
+   Practical targets (buttons, links, selects, inputs) clear 44px. Layout is flex/wrap so
+   no horizontal scroll at mobile widths or under large text.
+   Global :focus-visible (index.css) covers focus rings. */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-6);
+  max-width: 920px;
+  width: 100%;
+}
+
+/* On wide viewports let the agent table use the available space.
+   Lowered from 1400px to 1024px so the table does not horizontally
+   overflow at common desktop widths. */
+@media (min-width: 1024px) {
+  .view {
+    max-width: 100%;
+  }
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+}
+
+.sectionHeading {
+  margin: 0;
+  font-size: var(--scope-font-size-lg);
+  font-weight: 700;
+  color: var(--scope-color-text);
+}
+
+/* Visually-hidden utility for accessible table captions */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- create form ---- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-4);
+  padding: var(--scope-space-4);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fieldRow {
+  display: flex;
+  gap: var(--scope-space-4);
+  flex-wrap: wrap;
+}
+
+.fieldRow .field {
+  flex: 1 1 220px;
+}
+
+.label {
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  color: var(--scope-color-text);
+}
+
+.input,
+.textarea {
+  min-height: var(--scope-target-min);
+  padding: 10px var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-family: inherit;
+  font-size: var(--scope-font-size-sm);
+  width: 100%;
+}
+
+.textarea {
+  resize: vertical;
+  line-height: var(--scope-line-height-normal);
+}
+
+.help {
+  margin: 0;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Warning hint in schedule help. Uses warning token (not color alone: paired with bold weight). */
+.hintWarn {
+  color: var(--scope-color-warning);
+  font-weight: 600;
+}
+
+/* Mono for code/identifiers only */
+.code {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: 0.92em;
+  color: var(--scope-color-text);
+  word-break: break-all;
+}
+
+/* ---- capability list ---- */
+
+.capabilityList {
+  list-style: none;
+  margin: var(--scope-space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.capabilityRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface-raised);
+  font-size: var(--scope-font-size-xs);
+}
+
+.capabilityGlyph {
+  font-size: 11px;
+}
+
+.capabilityName {
+  font-weight: 700;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+}
+
+.capabilityStatus {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  color: var(--scope-color-text-muted);
+}
+
+.capabilityDetail {
+  color: var(--scope-color-text-muted);
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+/* ---- buttons ----
+   primaryBtn: accent fill (Create agent, Run now). Text on accent must clear 4.5:1.
+     Light: #1F4BDB bg, white text (#fff) -> ratio ~5.0:1 (passes AA).
+     Dark:  #98AAFF bg, dark text (#0E1110) -> ratio ~9.2:1 (passes AA).
+   dangerBtn: danger fill (Confirm remove). Text on danger must clear 4.5:1.
+     Light: #A33A32 bg, white text -> ratio ~4.8:1 (passes AA).
+     Dark:  #FF9389 bg, dark text (#0E1110) -> ratio ~8.2:1 (passes AA).
+   secondaryBtn: surface-raised fill, primary text (no separate text color check needed
+     as --scope-color-text on --scope-color-surface-raised inherits from theme). */
+
+.primaryBtn,
+.secondaryBtn,
+.dangerBtn {
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: 10px 18px;
+  border-radius: var(--scope-radius-sm);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+/* Primary: accent fill + contrasting text. See contrast note above. */
+.primaryBtn {
+  background-color: var(--scope-color-accent);
+  border-color: var(--scope-color-accent);
+  color: var(--scope-color-surface-raised);
+}
+
+/* In dark theme the accent token is a light purple (#98AAFF); override text to dark. */
+[data-theme="dark"] .primaryBtn {
+  color: var(--scope-color-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .primaryBtn,
+  [data-theme="system"] .primaryBtn {
+    color: var(--scope-color-bg);
+  }
+}
+
+.primaryBtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.secondaryBtn {
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  border-color: var(--scope-color-border);
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  border-color: var(--scope-color-text-muted);
+}
+
+/* Danger: danger fill + contrasting text. See contrast note above. */
+.dangerBtn {
+  background-color: var(--scope-color-danger);
+  border-color: var(--scope-color-danger);
+  color: var(--scope-color-surface-raised);
+}
+
+/* In dark theme danger token is light (#FF9389); override text to dark. */
+[data-theme="dark"] .dangerBtn {
+  color: var(--scope-color-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .dangerBtn,
+  [data-theme="system"] .dangerBtn {
+    color: var(--scope-color-bg);
+  }
+}
+
+.dangerBtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.primaryBtn:disabled,
+.secondaryBtn:disabled,
+.dangerBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.formActions {
+  display: flex;
+  gap: var(--scope-space-3);
+}
+
+/* ---- alerts ---- */
+
+/* Status glyph-block card layout: StatusGlyphBlock leads, content follows.
+   The card is a flex row with a 1px status-colored border; no fill (clean card).
+   Status = solid glyph-block (color + shape) + text. Not color alone. */
+
+/* Error alert: danger border. */
+.error {
+  margin: 0;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--scope-color-danger);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-danger-bg);
+  font-size: var(--scope-font-size-xs);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Inner text content area beside the glyph block. */
+.errorContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  color: var(--scope-color-text);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Success alert: success border. */
+.success {
+  margin: 0;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--scope-color-success);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-success-bg);
+  font-size: var(--scope-font-size-xs);
+  line-height: var(--scope-line-height-normal);
+}
+
+.successContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  color: var(--scope-color-text);
+}
+
+.notice {
+  margin: 0;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+}
+
+/* ---- agent table (was article cards) ---- */
+
+.agentTableWrapper {
+  overflow-x: auto;
+  width: 100%;
+}
+
+.agentTable {
+  width: 100%;
+  /* table-layout:auto lets the browser distribute available width naturally across
+     all columns rather than being driven by fixed/min-width constraints. This is
+     approach (a) from D2: simplest, lowest risk. */
+  table-layout: auto;
+  border-collapse: collapse;
+  font-size: var(--scope-font-size-sm);
+}
+
+.agentTable th,
+.agentTable td {
+  text-align: left;
+  /* Tightened from 10px horizontal to 8px (on the 4/8px grid) to reduce width
+     pressure from padding across 8 columns. Vertical padding stays at 8px. */
+  padding: var(--scope-space-2) var(--scope-space-2);
+  border-bottom: 1px solid var(--scope-color-border);
+  vertical-align: top;
+}
+
+.agentTable th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+  /* Remove default padding so the sort button fills the header cell */
+  padding: 0;
+}
+
+/* ---- sortable column headers (T-2026-06-13-35) ---- */
+
+/* The <th> that wraps the sort button. Keeps the same column sizing as the
+   original static header but delegates visual padding to the button. */
+.sortableHeader {
+  padding: 0 !important;
+}
+
+/* Sort button fills the full 44px target height of the header cell. */
+.sortBtn {
+  /* Inherits the th text style above via the table cascade, but we override
+     the relevant bits so the button looks like a header label. */
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-2);
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.sortBtn:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface-raised);
+}
+
+/* Active sort column: text shifts to primary color with accent underline. */
+.sortBtnActive {
+  color: var(--scope-color-text);
+  border-bottom: 2px solid var(--scope-color-accent);
+}
+
+.sortBtnActive:hover {
+  color: var(--scope-color-text);
+}
+
+/* Sort indicator glyph (↑ ↓ ↕). Mono-width so the column label stays stable. */
+.sortIcon {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ---- schedule cell (T-2026-06-13-35) ---- */
+
+/* Stacks the human description over the raw expression (secondary/mono). */
+.scheduleCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scheduleHuman {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+}
+
+/* Timezone note "(UTC)" appended after the human description when relevant. */
+.scheduleTzNote {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* Raw expression rendered below the human description in mono. */
+.scheduleRaw {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: 0.82em;
+  color: var(--scope-color-text-muted);
+  word-break: break-all;
+}
+
+/* ---- last-run timestamp cell (T-2026-06-13-35) ---- */
+
+.lastRunAt {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+}
+
+/* Agent name cell: was .agentName (span), now .agentNameLink (anchor to detail page).
+   Link is bold + accent color with underline on hover; 44px min target via row height. */
+.agentNameLink {
+  font-weight: 700;
+  color: var(--scope-color-accent);
+  text-decoration: none;
+}
+
+.agentNameLink:hover {
+  text-decoration: underline;
+}
+
+/* Keep old .agentName for backwards compat */
+.agentName {
+  font-weight: 700;
+  color: var(--scope-color-text);
+}
+
+/* Detail row cell that spans all columns (table layout <td> wrapper) */
+.agentDetailCellTable {
+  padding: 0;
+  background-color: var(--scope-color-surface);
+}
+
+/* Detail panel inner container — used in both table and card layouts */
+.agentDetailCell {
+  padding: var(--scope-space-3) var(--scope-space-2);
+  background-color: var(--scope-color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-2);
+}
+
+/* Per-agent expanded panel inside the detail row */
+
+/* Actions cell: wraps action buttons */
+.agentActions {
+  display: flex;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Status indicator for running poll (text + shape, not color alone) */
+.pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-warning);
+  font-weight: 600;
+}
+
+/* Confirm-remove group: danger border + tinted bg + text + required extra button for confirm */
+.confirmGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px solid var(--scope-color-danger);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-danger-bg);
+}
+
+.confirmText {
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  color: var(--scope-color-text);
+}
+
+/* ---- run confirm panel ----
+   Status glyph-block card: warning glyph-block leads, content follows.
+   Outer flex row; the glyph-block is a solid warning square.
+   Warning cue = solid glyph-block (color + shape) + text. Not color alone. */
+
+.runConfirmPanel {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--scope-color-warning);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-warning-bg);
+}
+
+/* Inner content area to the right of the glyph-block. */
+.runConfirmContent {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-3);
+}
+
+.runConfirmWarning {
+  margin: 0;
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  line-height: var(--scope-line-height-normal);
+}
+
+.runConfirmDetails {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.runConfirmRow {
+  display: flex;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.runConfirmRow dt {
+  flex: 0 0 110px;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+}
+
+.runConfirmRow dd {
+  margin: 0;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text);
+  min-width: 0;
+  word-break: break-all;
+}
+
+.runConfirmActions {
+  display: flex;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---- run result ---- */
+
+.runResult {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface-raised);
+}
+
+.runStatusLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Cost display inside run result — uses CostProvenanceChip; this wraps it */
+.runCost {
+  margin-left: auto;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+}
+
+.runCostLabel {
+  /* "cost:" label prefix */
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+.runMeta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+}
+
+.metaPair {
+  display: flex;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+}
+
+.metaKey {
+  flex: 0 0 110px;
+  font-size: var(--scope-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+}
+
+.metaVal {
+  margin: 0;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text);
+  min-width: 0;
+}
+
+.metaMuted {
+  color: var(--scope-color-text-muted);
+}
+
+/* Trace deep-link: accent color for link, minimum 44px height for target */
+.traceLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  flex-wrap: wrap;
+  min-height: var(--scope-target-min);
+  color: var(--scope-color-accent);
+  text-decoration: underline;
+}
+
+.traceLink:hover {
+  text-decoration: none;
+}
+
+.traceLinkText {
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+}
+
+/* Run detail paragraph (error_message / skip_reason) */
+.runDetail {
+  margin: 0;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Warning callout for failed/skipped detail: status glyph-block card.
+   Warning glyph-block leads, detail text follows. Status = shape + color + text. */
+.runDetailWarn {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--scope-color-warning);
+  background-color: var(--scope-color-warning-bg);
+  border-radius: var(--scope-radius-none);
+}
+
+.runDetailWarnContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--scope-space-2) 10px;
+}
+
+/* ---- history ---- */
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: var(--scope-space-2);
+  border-top: 1px solid var(--scope-color-border);
+}
+
+.historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+}
+
+.historyHeading {
+  margin: 0;
+  font-size: var(--scope-font-size-sm);
+  font-weight: 700;
+  color: var(--scope-color-text);
+}
+
+/* History uses EvidenceTable (FE-1); these are for the legacy fallback table inside
+   RunHistory which is also being migrated. */
+.historyTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--scope-font-size-xs);
+}
+
+.historyTable th,
+.historyTable td {
+  text-align: left;
+  padding: var(--scope-space-2) 10px;
+  border-bottom: 1px solid var(--scope-color-border);
+  vertical-align: top;
+}
+
+.historyTable th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+}
+
+.historyDetail {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  word-break: break-word;
+}
+
+/* ---- agent meta (inside table expanded row) ---- */
+
+.agentMeta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+}
+
+/* ---- cron agent detail page ---- */
+
+/* Back navigation bar: minimal affordance above the page title. */
+.detailNav {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+}
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: 8px var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.backBtn:hover {
+  border-color: var(--scope-color-text-muted);
+}
+
+/* Config definition list: two-column label/value layout. */
+.detailConfig {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--scope-space-4);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+}
+
+.detailConfigRow {
+  display: flex;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.detailConfigRow dt {
+  flex: 0 0 140px;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+}
+
+.detailConfigRow dd {
+  margin: 0;
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  min-width: 0;
+  word-break: break-all;
+}
+
+/* Actions panel for the detail page. */
+.detailActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+}
+
+/* ---- edit modal (T-2026-06-17-05) ---- */
+/* Sharp/geometric: square corners, lines over shadows, semantic tokens only. */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--scope-space-6) var(--scope-space-4);
+  overflow-y: auto;
+  /* Scrim: dim the page without inventing a raw color. */
+  background-color: color-mix(in srgb, var(--scope-color-text) 45%, transparent);
+}
+
+.modalDialog {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-4);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-bg);
+}
+
+.modalHeading {
+  margin: 0;
+  font-size: var(--scope-font-size-lg);
+  font-weight: 700;
+  color: var(--scope-color-text);
+}
+
+/* ---- checkbox row (concurrency toggle) ---- */
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  min-height: var(--scope-target-min);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  cursor: pointer;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--scope-color-accent);
+  cursor: pointer;
+}
+
+/* ---- dual-layout: desktop/mobile visibility ---- */
+
+/*
+ * Desktop-only: visible >=769px, hidden below.
+ * Mobile-only:  visible below 769px, hidden at >=769px.
+ * 768px chosen as the breakpoint where the action columns begin to clip off-screen.
+ */
+
+/* Desktop table wrapper: always present in DOM but hidden on mobile. */
+.desktopOnly {
+  display: block;
+}
+
+/* Mobile card list: always present in DOM but hidden on desktop. */
+.mobileOnly {
+  display: none;
+}
+
+/* Canonical primary mobile/desktop breakpoint: max-width: 768px. */
+@media (max-width: 768px) {
+  .desktopOnly {
+    display: none !important;
+  }
+  .mobileOnly {
+    display: flex !important;
+    flex-direction: column;
+    gap: var(--scope-space-3);
+  }
+}
+
+/* ---- mobile agent card ---- */
+
+/*
+ * Each card is a bordered article with semantic <dl> fields and a wrapped action row.
+ * Sharp/geometric: radius 0, 1px border (lines > shadows), 4/8px grid.
+ * Status = text + shape + color (StatusBadge already does this).
+ * WCAG AA: 44px action targets, visible focus, non-color-only.
+ */
+
+.agentCardList {
+  /* populated by .mobileOnly display rule above */
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.agentCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+  /* Prevent card from exceeding its container width */
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Clip horizontal overflow only so the run-confirm panel (vertical) still displays */
+  overflow-x: hidden;
+}
+
+/* Card header: agent name link prominently above the detail fields */
+.cardHeader {
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  padding-bottom: var(--scope-space-2);
+  min-width: 0;
+}
+
+/* Definition list of key fields */
+.cardFields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-2);
+}
+
+/* Individual field row: label left, value right (wraps on very narrow viewports) */
+.cardField {
+  display: flex;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.cardFieldLabel {
+  flex: 0 0 120px;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+  /* Prevent label from shrinking below its content */
+  min-width: 0;
+}
+
+.cardFieldValue {
+  flex: 1 1 0;
+  margin: 0;
+  min-width: 0;
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  word-break: break-word;
+}
+
+/* ---- responsive ---- */
+
+@media (max-width: 560px) {
+  .metaKey {
+    flex-basis: 100%;
+  }
+
+  .detailConfigRow dt {
+    flex-basis: 100%;
+  }
+
+  /* On very narrow screens, stack the card field label above the value */
+  .cardFieldLabel {
+    flex-basis: 100%;
+  }
+}

@@ -1,0 +1,76 @@
+/*
+ * StatusBadge.module.css (FE-1)
+ *
+ * Status = text + shape + color token. Never color alone.
+ * The badge renders a visible label + icon glyph + a semantic status token.
+ * Token selection is handled via data-status-token attribute on the root element.
+ *
+ * Constraint: use only --scope-color-* tokens (never raw hex, never trace-tool tokens).
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  padding: 2px var(--scope-space-2);
+  border-radius: var(--scope-radius-sm);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  line-height: var(--scope-line-height-tight);
+  white-space: nowrap;
+  /* Default (muted) appearance; overridden by data-status-token */
+  color: var(--scope-color-text-muted);
+  background-color: var(--scope-color-surface-2);
+  border: 1px solid var(--scope-color-border-subtle);
+}
+
+/* Status token attribute selectors — maps semantic status to color tokens */
+.badge[data-status-token="success"] {
+  color: var(--scope-color-success);
+  background-color: var(--scope-color-success-bg);
+  border-color: var(--scope-color-success);
+}
+
+.badge[data-status-token="warning"] {
+  color: var(--scope-color-warning);
+  background-color: var(--scope-color-warning-bg);
+  border-color: var(--scope-color-warning);
+}
+
+.badge[data-status-token="danger"] {
+  color: var(--scope-color-danger);
+  background-color: var(--scope-color-danger-bg);
+  border-color: var(--scope-color-danger);
+}
+
+.badge[data-status-token="info"] {
+  color: var(--scope-color-info);
+  background-color: var(--scope-color-info-bg);
+  border-color: var(--scope-color-info);
+}
+
+.badge[data-status-token="muted"] {
+  color: var(--scope-color-text-muted);
+  background-color: var(--scope-color-surface-2);
+  border-color: var(--scope-color-border-subtle);
+}
+
+/* Shape/icon wrapper */
+.shape {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  /* Icon is purely supplemental — aria-hidden on the SVG; label carries meaning */
+}
+
+/* Inline size: matches em-height of surrounding text */
+.shape svg {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+
+/* Enabled/disabled variant (for CronView replacement in FE-3) */
+.badge[data-enabled="false"] {
+  opacity: 0.7;
+}

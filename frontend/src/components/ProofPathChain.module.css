@@ -1,0 +1,121 @@
+/* =============================================================================
+   ProofPathChain.module.css (PP-07)
+
+   Design contract:
+     - --scope-* tokens only. No raw hex.
+     - Sharp + geometric: radius 0 by default; --scope-radius-sm (2px) for the
+       copy button only (small interactive control).
+     - 4/8px spacing grid (--scope-space-*).
+     - 44px minimum touch target on the copy button (--scope-target-min).
+     - Visible focus ring in both light and dark themes (--scope-focus-ring).
+     - Chain wraps and reflows; no clipping (EDGE-DATA-3, EDGE-A11Y-4).
+   ============================================================================= */
+
+/* Root layout: wraps the length badge, chain, and copy button.
+   flex-wrap so the chain can reflow at narrow widths (EDGE-DATA-3). */
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--scope-space-2);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  line-height: var(--scope-line-height-normal);
+}
+
+/* Length badge: small numeric indicator so a wrapped chain is still
+   countable (EDGE-DATA-3, EDGE-A11Y-4). */
+.lengthBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--scope-space-1);
+  border: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface-2);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  flex-shrink: 0;
+  /* Sharp: no border-radius (design contract). */
+}
+
+/* Empty chain label */
+.emptyLabel {
+  color: var(--scope-color-text-muted);
+  font-style: italic;
+}
+
+/* Ordered list: rendered inline-flex with wrap so hops reflow at narrow widths.
+   list-style: none so the browser default numbers are hidden (we own layout). */
+.chain {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Each hop: inline-flex so the arrow and name stay together by preference,
+   then wrap to the next line when space is tight. */
+.hop {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--scope-space-1);
+}
+
+/* Arrow glyph between hops (aria-hidden in JSX). */
+.arrow {
+  color: var(--scope-color-text-muted);
+  padding: 0 var(--scope-space-1);
+  user-select: none;
+}
+
+/* Hop display name: monospace to match the server .Name convention. */
+.hopName {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text);
+  word-break: break-all;
+}
+
+/* Copy button: 44px minimum touch target (--scope-target-min), sharp with
+   --scope-radius-sm (2px) per contract for small interactive controls.
+   Focus ring visible in both themes. */
+.copyBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--scope-target-min);
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-1) var(--scope-space-2);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-family: var(--scope-font-sans);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.1s ease, background-color 0.1s ease;
+}
+
+.copyBtn:hover {
+  border-color: var(--scope-color-border);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+}
+
+/* Focus ring: visible in both light and dark themes via --scope-focus-ring
+   and --scope-focus-ring-offset tokens (EDGE-A11Y-5). */
+.copyBtn:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: 2px;
+}
+
+.copyBtnText {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

@@ -1,0 +1,101 @@
+/*
+ * AffectedSymbolsTable.module.css (PP-08b, Proof Paths)
+ *
+ * Affected-symbols (dependents) evidence table.
+ *
+ * Design contract (CLAUDE.md, scope_frontend_design_doc.md):
+ *   - --scope-* tokens only; no raw hex.
+ *   - Sharp corners (--scope-radius-none = 0); 4/8px grid.
+ *   - Status = text + shape + glyph (never color alone; WCAG 2.2 AA).
+ *   - 44px minimum touch targets on interactive controls.
+ */
+
+/* ---------------------------------------------------------------------------
+   .section — outer wrapper providing border and background
+   --------------------------------------------------------------------------- */
+
+.section {
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  background: var(--scope-color-surface);
+}
+
+/* ---------------------------------------------------------------------------
+   .emptyState — "No affected dependents" sub-state when symbols is empty
+   --------------------------------------------------------------------------- */
+
+.emptyState {
+  padding: var(--scope-space-6) var(--scope-space-4);
+  text-align: center;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------------------
+   .relCell — relationship type cell: glyph + label inline
+   --------------------------------------------------------------------------- */
+
+.relCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  white-space: nowrap;
+}
+
+.relGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--scope-space-5);    /* 20px square glyph-block */
+  height: var(--scope-space-5);
+  background-color: var(--scope-color-accent-bg);
+  color: var(--scope-color-accent);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  font-size: var(--scope-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.relLabel {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+   .nameCell — dependent display_name, monospace for identifier readability
+   --------------------------------------------------------------------------- */
+
+.nameCell {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------------------
+   .pathLengthCell — numeric path length, centered, tabular
+   --------------------------------------------------------------------------- */
+
+.pathLengthCell {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   .disclosure — cap-with-disclosure line (EDGE-DATA-2)
+   --------------------------------------------------------------------------- */
+
+.disclosure {
+  padding: var(--scope-space-2) var(--scope-space-4);
+  border-top: 1px solid var(--scope-color-border-subtle);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  text-align: center;
+}

@@ -1,0 +1,369 @@
+/* AccountingPanel.module.css — FE-4c shim retirement.
+   All colors use --scope-color-* product tokens (direct canonical names).
+   No raw hex. No shim aliases. Trace-tool colors appear only in inline styles (card-surface context)
+   via taxonomy.ts var refs consumed by TopList component. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.notice {
+  color: var(--scope-color-text-muted);
+}
+
+.error {
+  color: var(--scope-color-danger);
+}
+
+/* ---- cost breakdown tooltip trigger (T-2026-06-15-11b) ----
+ * The cost value is wrapped in a <button> so keyboard users can Tab to it and
+ * trigger the tooltip on focus (bare <span> is not tabbable: WCAG keyboard).
+ * Styled inline (no underline, no box) to look identical to plain text, but with
+ * a subtle dotted underline to hint at the interactive affordance.
+ * Focus ring is provided globally by :focus-visible in index.css (--scope-focus-ring). */
+.costTrigger {
+  /* Reset button defaults */
+  all: unset;
+  cursor: default;
+  /* Preserve mono font from the parent .totalValue / .num context */
+  font: inherit;
+  color: inherit;
+  /* Subtle dotted underline as an interactive affordance hint */
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  /* Ensure focus ring is visible in both themes (global :focus-visible handles color) */
+  border-radius: var(--scope-radius-sm);
+}
+
+/* ---- token breakdown tooltip trigger (T-2026-06-15-12) ----
+ * Mirrors .costTrigger exactly: keyboard-focusable button styled as inline text
+ * with a dotted underline affordance hint. Focus ring via global :focus-visible. */
+.tokenTrigger {
+  /* Reset button defaults */
+  all: unset;
+  cursor: default;
+  /* Preserve mono font from the parent .totalValue / .num context */
+  font: inherit;
+  color: inherit;
+  /* Subtle dotted underline as an interactive affordance hint */
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  /* Ensure focus ring is visible in both themes (global :focus-visible handles color) */
+  border-radius: var(--scope-radius-sm);
+}
+
+/* ---- cost breakdown tooltip content (T-2026-06-15-11b) ---- */
+.breakdownContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: 11px;
+  line-height: var(--scope-line-height-normal);
+  color: var(--scope-color-text);
+}
+
+.breakdownModel {
+  font-weight: 700;
+  color: var(--scope-color-text);
+  font-family: var(--scope-font-sans);
+}
+
+.breakdownDate {
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-sans);
+  font-size: 10px;
+  margin-bottom: var(--scope-space-1);
+}
+
+.breakdownLine {
+  display: block;
+  white-space: nowrap;
+}
+
+.breakdownTotal {
+  display: block;
+  font-weight: 700;
+  border-top: 1px solid var(--scope-color-border-subtle);
+  padding-top: var(--scope-space-1);
+  margin-top: var(--scope-space-1);
+}
+
+/* ---- header totals ---- */
+.totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.totalCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+  /* min-width:0 lets the grid item shrink to its track instead of being forced wider by
+     non-wrapping content (the value row), which previously bled into the adjacent card. */
+  min-width: 0;
+}
+
+.totalLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--scope-color-text-muted);
+}
+
+.totalValue {
+  display: flex;
+  align-items: center;
+  /* flex-wrap + min-width:0 keep the inline KnownAssumedNote (e.g. "assumed $X (i)") contained:
+     it wraps below the headline value when it does not fit instead of overflowing the card into
+     the adjacent one (T-2026-06-17-01). */
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 8px;
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  color: var(--scope-color-text);
+}
+
+.atLeast {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--scope-color-text-muted);
+}
+
+.totalSub {
+  font-size: 11px;
+  color: var(--scope-color-text-muted);
+}
+
+/*
+ * Estimation basis detail — transparent label under the cost value when
+ * cost_estimation_basis is present (T-2026-06-15-02).
+ * Color: --scope-color-text-muted; meets WCAG AA in both themes.
+ * No raw hex; no trace-tool tokens.
+ */
+.basisDetail {
+  font-size: 11px;
+  color: var(--scope-color-text-muted);
+  font-style: italic;
+}
+
+/* ---- coherence banner ---- */
+.coherence {
+  padding: 8px 12px;
+  border-radius: var(--scope-radius-none);
+  font-size: 12px;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  border: 1px solid;
+}
+
+.balanced {
+  border-color: var(--scope-color-success);
+  background-color: var(--scope-color-success-bg);
+  color: var(--scope-color-text);
+}
+
+.mismatch {
+  border-color: var(--scope-color-danger);
+  background-color: var(--scope-color-danger-bg);
+  color: var(--scope-color-text);
+}
+
+/* ---- per-task table ---- */
+.heading {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--scope-color-text);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th,
+.table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--scope-color-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+  font-weight: 600;
+}
+
+.num {
+  text-align: right;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  white-space: nowrap;
+}
+
+.taskName {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  margin-right: 6px;
+}
+
+.timeSrc {
+  font-size: 11px;
+  color: var(--scope-color-text-muted);
+}
+
+.unattributedRow {
+  color: var(--scope-color-text-muted);
+}
+
+.totalRow td {
+  font-weight: 700;
+  border-top: 2px solid var(--scope-color-border);
+  border-bottom: none;
+}
+
+/* ---- top actions ---- */
+.topGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.topCol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.topTitle {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+}
+
+.topUl {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.topItem {
+  display: grid;
+  grid-template-columns: 130px 1fr 64px;
+  align-items: center;
+  gap: 8px;
+}
+
+.topLabel {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* color set inline via taxonomy var ref (trace-tool token on card surface) */
+}
+
+.topBarWrap {
+  height: 10px;
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface-raised);
+  overflow: hidden;
+}
+
+.topBar {
+  display: block;
+  height: 100%;
+  border-radius: var(--scope-radius-none);
+  /* backgroundColor set inline via taxonomy var ref */
+}
+
+.topNum {
+  text-align: right;
+  font-size: 12px;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  color: var(--scope-color-text);
+}
+
+/* ---- known/assumed breakdown note (T-2026-06-16-06 + ST-02 condensation) ---- */
+.knownAssumedNote {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--scope-space-2);
+  font-size: var(--scope-font-size-xs);
+}
+
+.knownBucket {
+  color: var(--scope-color-text);
+  white-space: nowrap;
+}
+
+.assumedBucket {
+  color: var(--scope-color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  white-space: nowrap;
+}
+
+/*
+ * Table-cell variant (T-2026-06-17-01): applied when KnownAssumedNote renders inside
+ * a narrow <td> (the tfoot "Cost src" cell). Overrides the bucket nowrap so the
+ * buckets can wrap within the cell, and pins min-width to 0 so the flex container
+ * stays contained rather than overflowing into the adjacent Busy column.
+ */
+.knownAssumedNoteTableCell {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.knownAssumedNoteTableCell .knownBucket {
+  white-space: normal;
+}
+
+.knownAssumedNoteTableCell .assumedBucket {
+  white-space: normal;
+  flex-wrap: wrap;
+}
+
+/* Info trigger button (i) — rendered inline next to the assumed bucket label.
+   Styled as a small muted text button, not a box. Focus ring via global :focus-visible. */
+.assumedInfoNote {
+  all: unset;
+  cursor: default;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  border-radius: var(--scope-radius-sm);
+  line-height: 1;
+}
+
+/* Tooltip prose content for the assumed-rate explanation. */
+.assumedInfoTooltip {
+  display: block;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text);
+  white-space: normal;
+  max-width: 280px;
+}

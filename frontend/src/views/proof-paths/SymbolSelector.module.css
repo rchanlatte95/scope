@@ -1,0 +1,155 @@
+/* SymbolSelector.module.css — PP-06
+   URL-owned combobox for the Proof Paths view.
+   All colors use --scope-color-* product tokens. No raw hex.
+   Sharp/geometric: radius 0 for container, --scope-radius-sm for the input.
+   Status = text + shape (no color-alone).
+   Selected option = INVERSE FILL BLOCK (no left accent stripe). */
+
+/* ---- Outer wrapper ---- */
+.wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ---- Search input ---- */
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface);
+  color: var(--scope-color-text);
+  font-family: var(--scope-font-sans);
+  font-size: var(--scope-font-size-sm);
+  min-height: var(--scope-target-min);
+  outline: none;
+}
+
+.input:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.input::placeholder {
+  color: var(--scope-color-text-muted);
+}
+
+/* ---- Listbox container (dropdown) ---- */
+.listbox {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: 1px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: 0;
+  background-color: var(--scope-color-surface-raised);
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  /* Lines over shadows per design contract */
+  box-shadow: 0 1px 0 var(--scope-color-border-subtle);
+}
+
+/* ---- Option item ---- */
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  min-height: var(--scope-target-min);
+  justify-content: center;
+  cursor: pointer;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  background-color: transparent;
+  color: var(--scope-color-text);
+}
+
+.option:last-child {
+  border-bottom: none;
+}
+
+/* INVERSE FILL BLOCK for keyboard-active (focused) option.
+   Per design contract: no left accent stripe; selected = inverse fill block. */
+.optionActive {
+  background-color: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+}
+
+.optionActive .optionKindFile {
+  color: var(--scope-color-selected-text);
+  opacity: 0.85;
+}
+
+.option:hover:not(.optionActive) {
+  background-color: var(--scope-color-accent-bg);
+}
+
+/* ---- Option FQN (primary row title) ---- */
+.optionFqn {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ---- Option kind + file (secondary meta, disambiguation line) ---- */
+.optionKindFile {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+.optionKind {
+  font-weight: 600;
+  font-size: var(--scope-font-size-xs);
+  /* Kind glyph-style block: text + square shape (no color-alone).
+     Background square behind the kind label. */
+  background-color: var(--scope-color-surface-2);
+  padding: 0 var(--scope-space-1);
+  border-radius: 0;
+  font-family: var(--scope-font-mono);
+}
+
+.optionDot {
+  color: var(--scope-color-border);
+  user-select: none;
+}
+
+.optionFile {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ---- Status notices (loading / empty / error) ---- */
+.notice {
+  padding: var(--scope-space-4) var(--scope-space-3);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+  text-align: center;
+}
+
+.errorNotice {
+  padding: var(--scope-space-3);
+  font-size: var(--scope-font-size-sm);
+  /* Error: glyph + text (no color-alone).
+     The "[!]" glyph in the text provides the shape signal.
+     Color supplements, not replaces, the glyph. */
+  color: var(--scope-color-danger);
+  border-top: 1px solid var(--scope-color-border-subtle);
+}

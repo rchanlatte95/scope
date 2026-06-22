@@ -1,0 +1,260 @@
+/* CommandView styles — FE-2c, Wave 5; T-2026-06-21-01 streamline.
+   All tokens are --scope-color-* product tokens or --scope-* space/font/radius tokens.
+   No raw hex. Status is text + shape + token, never color alone.
+   Practical targets (buttons, links) clear 44px.
+   Layout is flex/wrap so no horizontal scroll at mobile widths or large text.
+   Sections 4–7 (Latest trace sessions, Budget & cost, Security & data,
+   Display preferences) removed; dead CSS selectors removed with them. */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-6);
+  max-width: 960px;
+  width: 100%;
+}
+
+/* On wide viewports let data-dense tables use the available space. */
+@media (min-width: 1400px) {
+  .view {
+    max-width: 100%;
+  }
+}
+
+/* ---- Section ---- */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+}
+
+.sectionHeading {
+  margin: 0;
+  font-size: var(--scope-font-size-lg);
+  font-weight: 700;
+  color: var(--scope-color-text);
+}
+
+.sectionHeaderRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--scope-space-2);
+}
+
+.sectionAction {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-accent);
+  text-decoration: underline;
+  min-height: var(--scope-target-min);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--scope-space-2);
+}
+
+/* ---- Section 1: Workspace status bar ---- */
+
+.statusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--scope-space-4);
+  padding: var(--scope-space-3) var(--scope-space-4);
+  background-color: var(--scope-color-surface);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+}
+
+.statusItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.statusLabel {
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--scope-color-text-muted);
+}
+
+.statusValue {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+}
+
+.statusValueMuted {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-style: italic;
+}
+
+/* ---- Section 2: Operating-state metric cards ---- */
+
+/* Auto-fit grid: cards expand to fill available width and add columns on wide screens
+   instead of leaving blank right-side gaps. AccountingPanel uses the same pattern. */
+.cardRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--scope-space-4);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  padding: var(--scope-space-4);
+  background-color: var(--scope-color-surface);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  text-decoration: none;
+  color: var(--scope-color-text);
+  min-width: 0;
+  min-height: var(--scope-target-min);
+  transition: border-color 0.1s;
+}
+
+.card:hover {
+  border-color: var(--scope-color-border);
+}
+
+.card:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.cardValue {
+  font-size: var(--scope-font-size-xl);
+  font-weight: 700;
+  color: var(--scope-color-text);
+  line-height: var(--scope-line-height-tight);
+}
+
+.cardLabel {
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  color: var(--scope-color-text);
+}
+
+.cardSub {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+.cardError {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-danger);
+}
+
+/* Loading skeleton for card values */
+.skeleton {
+  display: inline-block;
+  width: 2.5rem;
+  height: 1.5rem;
+  background-color: var(--scope-color-surface-2);
+  border-radius: var(--scope-radius-sm);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ---- Shared table area ---- */
+
+.loadingMsg {
+  margin: 0;
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-style: italic;
+}
+
+.freshness {
+  margin: 0;
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+.tableLink {
+  color: var(--scope-color-accent);
+  text-decoration: underline;
+}
+
+/* ---- Absolute time supplement (relative in parens) ---- */
+
+.timeRelative {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* ---- Shared ---- */
+
+.mono {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-sm);
+  /* Allow long identifiers (e.g. session keys) to break at any character so they
+     do not overflow narrow viewports or large text sizes. */
+  overflow-wrap: break-word;
+  word-break: break-all;
+}
+
+.muted {
+  color: var(--scope-color-text-muted);
+}
+
+/* Primary action button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--scope-space-4);
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  background-color: var(--scope-color-accent);
+  color: var(--scope-color-surface);
+  border-radius: var(--scope-radius-sm);
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.btn:hover {
+  opacity: 0.88;
+}
+
+.btn:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+/* ---- Reflow at 320px / mobile ---- */
+
+@media (max-width: 480px) {
+  .cardRow {
+    grid-template-columns: 1fr;
+  }
+
+  .statusBar {
+    flex-direction: column;
+    gap: var(--scope-space-3);
+  }
+
+  .sectionHeaderRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

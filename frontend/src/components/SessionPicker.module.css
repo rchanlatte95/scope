@@ -1,0 +1,536 @@
+/* SessionPicker.module.css — ST-04
+   Session picker panel: date-range filter + CLI/Cron tabs + session list.
+   All colors use --scope-color-* product tokens. No raw hex. No em dash.
+   Sharp/geometric: radius 0 for panels, --scope-radius-sm for small controls.
+   Status = text + shape + color (glyphs used throughout, never color alone). */
+
+/* ---- Outer panel ---- */
+.picker {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--scope-color-border);
+  background-color: var(--scope-color-surface);
+}
+
+/* ---- Date range picker (DateRangePicker replaces raw datetime-local inputs) ---- */
+.pickerDateRange {
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface-2);
+}
+
+/* ---- Picker tab bar ---- */
+/* Visually distinct from the Trace/Accounting detail tabs below:
+   - This bar uses a solid surface-2 background.
+   - Detail tabs below use a borderless transparent background with a bottom border.
+   Keeping them apart prevents users from reading them as one merged tab set. */
+.pickerTabBar {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--scope-color-border);
+  background-color: var(--scope-color-surface-2);
+  /* Prevent tab bar from causing horizontal overflow on narrow viewports.
+     The controls (tabs + toggles) can scroll horizontally inside the bar. */
+  overflow-x: auto;
+}
+
+.pickerTab {
+  padding: var(--scope-space-2) var(--scope-space-4);
+  min-height: var(--scope-target-min);
+  border: none;
+  border-right: 1px solid var(--scope-color-border-subtle);
+  border-radius: 0;
+  background: none;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pickerTab:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface);
+}
+
+/* INVERSE FILL BLOCK for the selected picker tab (per design contract;
+   no left accent stripe). AA-verified: white on selected-bg >= 6:1. */
+.pickerTabActive {
+  background-color: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+  border-right-color: var(--scope-color-selected-bg);
+}
+
+.pickerTabActive:hover {
+  background-color: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+}
+
+.pickerTabSpacer {
+  flex: 1 1 0;
+}
+
+/* Trash toggle — small secondary action on the right side of the tab bar. */
+.trashToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  min-height: var(--scope-target-min);
+  border: none;
+  border-left: 1px solid var(--scope-color-border-subtle);
+  border-radius: 0;
+  background: none;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.trashToggle:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface);
+}
+
+.trashToggleActive {
+  color: var(--scope-color-danger);
+  background-color: var(--scope-color-danger-bg);
+}
+
+/* Conversation lens toggle -- small secondary action; mirrors trashToggle layout.
+   Shown on the Agent tab only, to the left of the trash toggle. */
+.convLensToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  min-height: var(--scope-target-min);
+  border: none;
+  border-left: 1px solid var(--scope-color-border-subtle);
+  border-radius: 0;
+  background: none;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.convLensToggle:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface);
+}
+
+/* Active (ON) state: accent-tinted; same visual language as other active toggles. */
+.convLensToggleActive {
+  color: var(--scope-color-accent);
+  background-color: var(--scope-color-accent-bg);
+}
+
+/* Singleton conversation label strip (T-2026-06-19-05 NIT fix).
+   Non-collapsible header row for single-session conversations: surfaces the
+   "Cron run" / "Conversation" label chip and optional spend without a chevron.
+   Same layout tokens as baseLaunchHeader but without cursor:pointer. */
+.singletonLabelStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  padding: var(--scope-space-1) var(--scope-space-3);
+  min-height: 32px;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface-2);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+}
+
+/* Conversation label chip inside the group header (e.g. "Conversation" or "Cron run").
+   Text only, no color-alone status. Muted, small, monospaced for scanning. */
+.convLensLabel {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  font-weight: 600;
+}
+
+/* ---- Session list panel ---- */
+.pickerPanel {
+  overflow-y: auto;
+  max-height: 340px;
+  min-height: 80px;
+}
+
+.pickerNotice {
+  margin: 0;
+  padding: var(--scope-space-4) var(--scope-space-3);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+}
+
+.pickerError {
+  margin: 0;
+  padding: var(--scope-space-4) var(--scope-space-3);
+  color: var(--scope-color-danger);
+  font-size: var(--scope-font-size-sm);
+}
+
+/* ---- Session list ---- */
+.sessionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each session row: horizontal flex with session button + action button. */
+.sessionRow {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.sessionRow:last-child {
+  border-bottom: none;
+}
+
+/* Selected row: INVERSE FILL BLOCK (per design contract, no left accent stripe). */
+.sessionRowSelected {
+  background-color: var(--scope-color-selected-bg);
+  color: var(--scope-color-selected-text);
+}
+
+.sessionRowSelected .sessionRowId,
+.sessionRowSelected .sessionRowJob,
+.sessionRowSelected .sessionRowAgent,
+.sessionRowSelected .sessionRowReqs,
+.sessionRowSelected .sessionRowTime,
+.sessionRowSelected .sessionRowDot,
+.sessionRowSelected .sessionRowSchedule,
+.sessionRowSelected .sessionRowCost,
+.sessionRowSelected .sessionRowStatus {
+  color: var(--scope-color-selected-text);
+}
+
+/* Deleted sessions: muted presentation. */
+.sessionRowDeleted {
+  opacity: 0.75;
+}
+
+/* Cron sessions get a small left indicator via text convention, not a stripe. */
+.sessionRowCron {
+  background-color: var(--scope-color-surface);
+}
+
+.sessionRowCron.sessionRowSelected {
+  background-color: var(--scope-color-selected-bg);
+}
+
+/* ---- Session row button (the selectable area) ---- */
+.sessionRowBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  min-height: var(--scope-target-min);
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  gap: var(--scope-space-1);
+}
+
+.sessionRowBtn:hover {
+  background-color: var(--scope-color-accent-bg);
+}
+
+.sessionRowBtn:disabled {
+  cursor: default;
+}
+
+.sessionRowBtn:disabled:hover {
+  background-color: transparent;
+}
+
+/* Display ID: monospaced, primary row title */
+.sessionRowId {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 700;
+  color: var(--scope-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Cron id line: session display id (mono, primary) + job label (secondary) side by side. */
+.sessionRowIdLine {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--scope-space-2);
+  max-width: 100%;
+}
+
+/* Cron job label: secondary to the session id so the user sees WHICH session a run traces. */
+.sessionRowJob {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Meta line: agent type, request count, timestamp */
+.sessionRowMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  max-width: 100%;
+}
+
+.sessionRowAgent {
+  color: var(--scope-color-text-muted);
+}
+
+.sessionRowDot {
+  color: var(--scope-color-border);
+  user-select: none;
+}
+
+.sessionRowReqs {
+  color: var(--scope-color-text-muted);
+}
+
+.sessionRowTime {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* Cron-specific meta line */
+.sessionRowCronMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  max-width: 100%;
+}
+
+.sessionRowSchedule {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+.sessionRowCost {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* Status indicator: glyph + text (not color alone) */
+.sessionRowStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+}
+
+/* Running indicator: glyph + text (WCAG 2.2 AA — not color alone) */
+.sessionRowRunning {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  color: var(--scope-color-success);
+  font-family: var(--scope-font-mono);
+}
+
+.sessionRowDeletedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  color: var(--scope-color-text-muted);
+}
+
+/* Cron status color tokens (text + glyph, not color alone) */
+.statusRunning {
+  color: var(--scope-color-success);
+}
+
+.statusSuccess {
+  color: var(--scope-color-success);
+}
+
+.statusDanger {
+  color: var(--scope-color-danger);
+}
+
+.statusMuted {
+  color: var(--scope-color-text-muted);
+}
+
+/* ---- Base-launch group header (ST-07) ---- */
+
+/* Group header row: a collapsible row above its child generation rows.
+   Not a selectable session itself — it is a structural grouping affordance.
+   Uses the same horizontal layout as sessionRow but with distinct surface. */
+.baseLaunchGroup {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.baseLaunchGroup:last-child {
+  border-bottom: none;
+}
+
+/* The expand/collapse header button for a multi-generation base. */
+.baseLaunchHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  padding: var(--scope-space-1) var(--scope-space-3);
+  min-height: 32px;
+  border: none;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface-2);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.baseLaunchHeader:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface);
+}
+
+/* Expand/collapse chevron glyph (text, not color alone). */
+.baseLaunchChevron {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Base launch display_id (shortened base key). */
+.baseLaunchId {
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  color: var(--scope-color-text);
+  flex-shrink: 0;
+}
+
+/* Meta fragment: generation count + total cost. */
+.baseLaunchMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+}
+
+/* Generation count chip (text only, no color-only status). */
+.baseLaunchGenCount {
+  font-family: var(--scope-font-mono);
+  color: var(--scope-color-text-muted);
+}
+
+/* Spend total for the entire base launch. */
+.baseLaunchSpend {
+  font-family: var(--scope-font-mono);
+  color: var(--scope-color-text-muted);
+}
+
+/* Child generation rows are indented slightly to visually nest under the header. */
+.baseLaunchChildren {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Generation badge on the session row (text chip, text+shape, no color alone).
+   Shown as a secondary label on the id line when this session is a non-zero generation. */
+.generationBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--scope-space-1);
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-2);
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* ---- Delete / Restore buttons — 44px touch target ---- */
+.deleteBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--scope-target-min);
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2);
+  border: none;
+  border-left: 1px solid var(--scope-color-border-subtle);
+  border-radius: 0;
+  background: none;
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-size: var(--scope-font-size-xs);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.deleteBtn:hover {
+  color: var(--scope-color-danger);
+  background-color: var(--scope-color-danger-bg);
+}
+
+.restoreBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--scope-target-min);
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border: none;
+  border-left: 1px solid var(--scope-color-border-subtle);
+  border-radius: 0;
+  background: none;
+  color: var(--scope-color-accent);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.restoreBtn:hover {
+  background-color: var(--scope-color-accent-bg);
+}

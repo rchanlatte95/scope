@@ -1,0 +1,157 @@
+/* ProofPathsView.module.css — PP-12 (Proof Paths Wave 3).
+   Design contract: --scope-* tokens only (no raw hex), sharp radius 0,
+   NO left accent stripe, WCAG 2.2 AA, visible focus in both themes. */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+  width: 100%;
+}
+
+/* ---- Always-visible selector region ---- */
+.selectorRegion {
+  width: 100%;
+  max-width: 640px;
+}
+
+/* ---- Staleness advisory (cosmetic; text + glyph, never color-alone) ---- */
+.staleNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--scope-space-2);
+  margin: 0;
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+}
+
+.staleGlyph {
+  font-family: var(--scope-font-mono);
+  font-weight: 600;
+  color: var(--scope-color-warning);
+}
+
+/* ---- Loading line ---- */
+.loading {
+  margin: 0;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+}
+
+/* ---- FQN inline code ---- */
+.fqn {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: 0.95em;
+  word-break: break-all;
+}
+
+/* ---- Landing action button ---- */
+.landingAction {
+  padding: var(--scope-space-2) var(--scope-space-4);
+  min-height: var(--scope-target-min);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  cursor: pointer;
+}
+
+.landingAction:hover {
+  border-color: var(--scope-color-text-muted);
+}
+
+.landingAction:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+/* ---- Results region ---- */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-4);
+  width: 100%;
+}
+
+.resultsHeading {
+  margin: 0;
+  font-size: var(--scope-font-size-lg);
+  font-weight: 600;
+  color: var(--scope-color-text);
+  /* tabIndex=-1 focus target: keep a visible ring so programmatic focus is
+     perceivable to sighted keyboard users (WCAG 2.4.7). */
+  outline: none;
+}
+
+.resultsHeading:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.countsSummary {
+  margin: 0;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-sm);
+}
+
+/* ---- Ambiguous-symbol recoverable candidate list (PP-12c) ---- */
+.ambiguous {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-2);
+  padding: var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+}
+
+.ambiguousHeading {
+  margin: 0;
+  font-weight: 600;
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+}
+
+.candidateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+}
+
+.candidateButton {
+  display: block;
+  width: 100%;
+  text-align: left;
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-sm);
+  word-break: break-all;
+  cursor: pointer;
+}
+
+.candidateButton:hover {
+  border-color: var(--scope-color-text-muted);
+}
+
+/* Selected = inverse fill block on focus/active per design contract
+   (no left accent stripe). */
+.candidateButton:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}

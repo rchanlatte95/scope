@@ -1,0 +1,700 @@
+/* TraceView.module.css — FE-4c shim retirement.
+   All colors use --scope-color-* product tokens (direct canonical names).
+   No raw hex. No shim aliases. No --clr-* trace-tool refs here (those belong in graph/timeline only). */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+/* ---- Trace layout: graph ABOVE timeline/table on all widths (owner, 2026-06-13) ---- */
+.traceLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.refNotice {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--scope-color-warning);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-warning-bg);
+  color: var(--scope-color-text);
+  font-size: 13px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--scope-color-border);
+}
+
+.tab {
+  padding: 7px 16px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--scope-color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--scope-color-text);
+}
+
+.tabActive {
+  color: var(--scope-color-text);
+  border-bottom-color: var(--scope-color-accent);
+}
+
+/* ---- Graph section (left on wide, top on narrow) ---- */
+.graphSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.graphLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--scope-color-text-muted);
+  font-weight: 600;
+}
+
+/* ---- Timeline section (EvidenceTable-based) ---- */
+.timelineSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.timelineLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--scope-color-text-muted);
+  font-weight: 600;
+}
+
+.timelinePagination {
+  padding: var(--scope-space-2) 0;
+  border-top: 1px solid var(--scope-color-border-subtle);
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.timelineUtility {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+  padding: var(--scope-space-2) 0;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+}
+
+.timelineUtilityLabel {
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.timelineBulkControls {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--scope-color-border);
+  background-color: var(--scope-color-surface);
+}
+
+.timelineBulkButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-3);
+  border: 0;
+  border-right: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font: inherit;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.timelineBulkButton:last-child {
+  border-right: 0;
+}
+
+.timelineBulkButton:hover {
+  background-color: var(--scope-color-surface-2);
+}
+
+.timelineBulkButton:focus-visible,
+.timelineDetailsButton:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.timelineBulkSymbol,
+.timelineDetailsSymbol {
+  color: var(--scope-color-accent);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-sm);
+  line-height: 1;
+}
+
+.timelineTypeCell {
+  display: inline-grid;
+  gap: 2px;
+}
+
+.timelineToolMark {
+  font-weight: 700;
+}
+
+.timelineDetailsButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: 0 var(--scope-space-2);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font: inherit;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.timelineDetailsButton:hover {
+  background-color: var(--scope-color-surface-2);
+  border-color: var(--scope-color-text-muted);
+}
+
+.timelineEventRow {
+  --row-surface: var(--scope-color-surface);
+}
+
+.timelineEventRowAlt {
+  --row-surface: var(--scope-color-surface-2);
+}
+
+.timelineEventRow.timelineEventRow.timelineEventRow td {
+  background-color: color-mix(in srgb, var(--event-color) 11%, var(--row-surface));
+}
+
+.timelineEventRowExpanded.timelineEventRowExpanded.timelineEventRowExpanded td {
+  background-color: color-mix(in srgb, var(--event-color) 20%, var(--row-surface));
+}
+
+.timelineDetailRow {
+  --detail-surface: var(--scope-color-surface);
+}
+
+.timelineDetailRowAlt {
+  --detail-surface: var(--scope-color-surface-2);
+}
+
+.timelineDetailRow.timelineDetailRow.timelineDetailRow td {
+  padding: 0;
+  background-color: color-mix(in srgb, var(--event-color) 8%, var(--detail-surface));
+  border-bottom: 1px solid var(--scope-color-border);
+}
+
+.timelineDetailPanel {
+  display: grid;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-3);
+  border-top: 1px solid var(--scope-color-border);
+  color: var(--scope-color-text);
+}
+
+.timelineDetailHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--scope-space-3);
+  flex-wrap: wrap;
+}
+
+.timelineDetailTitleGroup {
+  display: grid;
+  gap: var(--scope-space-1);
+  min-width: 0;
+}
+
+.timelineDetailKicker {
+  width: fit-content;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.timelineDetailTitle {
+  margin: 0;
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 700;
+  line-height: var(--scope-line-height-tight);
+  overflow-wrap: anywhere;
+}
+
+.timelineDetailAlias {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  color: var(--scope-color-accent);
+}
+
+.timelineDetailAffordances {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+}
+
+.timelineDetailToolMark {
+  padding: 2px var(--scope-space-2);
+  border: 1px solid currentColor;
+  background-color: var(--scope-color-surface);
+}
+
+.timelineDetailMeta,
+.timelineDetailFacts {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-xs);
+}
+
+.timelineDetailFacts {
+  padding: var(--scope-space-2);
+  border: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface);
+}
+
+/* Caps provenance block: present/missing field listing (plain text, no tooltip).
+   Scope is a provenance trust surface — users must see WHICH fields were captured. */
+.timelineDetailCapsProvenance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-1);
+  padding: var(--scope-space-2);
+  border: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+}
+
+.timelineDetailCapsLabel {
+  font-weight: 700;
+  color: var(--scope-color-text);
+  letter-spacing: 0.02em;
+}
+
+.timelineDetailCapsSection {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.timelineDetailCapsHeading {
+  font-weight: 700;
+  color: var(--scope-color-text);
+}
+
+.timelineDetailCost {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+}
+
+.timelineDetailCostLabel {
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Card list fallback (when not using EvidenceTable) */
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 24px;
+}
+
+.loadMore {
+  padding: 6px 18px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.loadMore:hover:not(:disabled) {
+  border-color: var(--scope-color-text-muted);
+}
+
+.loadMore:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.endNote {
+  color: var(--scope-color-text-muted);
+  font-size: 12px;
+}
+
+.notice {
+  color: var(--scope-color-text-muted);
+}
+
+.error {
+  color: var(--scope-color-danger);
+}
+
+/* ---- Legend area ---- */
+.legendSection {
+  padding: 10px 12px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+}
+
+/* ---- Observability limit notices — collapsible disclosure (T-2026-06-13-39) ----
+   Status glyph-block card: warning glyph-block leads the summary button.
+   Collapsed by default; the panel of notices is revealed on expand.
+   Not color-only: shape + color + text carry the meaning.
+   Wraps at any width for reflow safety. */
+
+.limitNotices {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--scope-color-warning);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+  overflow: hidden;
+}
+
+/* Flex row that contains [glyph-block] + [summary button] */
+.limitNoticesHeader {
+  display: flex;
+  align-items: stretch;
+}
+
+/* Summary/trigger button — fills the remaining width beside the glyph block */
+.limitNoticesSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--scope-target-min);
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--scope-color-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.limitNoticesSummary:hover {
+  background-color: var(--scope-color-surface-2);
+}
+
+/* .limitNoticesGlyph kept for backward compat (no longer used in JSX but CSS is safe) */
+.limitNoticesGlyph {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.limitNoticesBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-warning-bg);
+  color: var(--scope-color-warning);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.limitNoticesChevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--scope-color-text-muted);
+}
+
+/* Expanded panel containing the individual notices */
+.limitNoticesPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 8px;
+  border-top: 1px solid var(--scope-color-border-subtle);
+}
+
+.limitNoticesPanel[hidden] {
+  display: none;
+}
+
+.limitNotice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--scope-color-text);
+  font-size: 13px;
+  line-height: 1.5;
+  /* Wrap freely so the notice reflows at mobile width and 200% zoom. */
+  flex-wrap: wrap;
+}
+
+.limitNoticeGlyph {
+  flex-shrink: 0;
+  font-size: 12px;
+  /* aria-hidden on the element; the text label carries the meaning. */
+}
+
+.limitNoticeText {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* ---- Deep-link outside-list notice (T-49) ---- */
+/* Status glyph-block card: info glyph-block leads the notice text.
+   Shown when a deep-linked session resolved via direct fetch but wasn't in the
+   capped /sessions list. Styled as an informational card, not an error. */
+.deepLinkNotice {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--scope-color-info);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-info-bg);
+}
+
+.deepLinkNoticeContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 12px;
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  line-height: var(--scope-line-height-normal);
+  flex-wrap: wrap;
+}
+
+/* ---- Timeline table highlight (shared selection) ---- */
+/* Legacy class kept for compat */
+.timelineHighlighted {
+  background-color: var(--scope-color-warning-bg);
+}
+
+/* Strongly-selected row (URL-keyed selection, both themes).
+   INVERSE FILL BLOCK: selected-bg (saturated blue) + selected-text (white).
+   AA-verified: white on #1F4BDB = 6.8:1 (light), white on #2E55E6 = 6.0:1 (dark).
+   No left accent stripe. Status = fill block + glyph, not a border stripe.
+   The !important on td ensures it overrides the nth-child alternating stripe. */
+.timelineRowSelected td {
+  background-color: var(--scope-color-selected-bg) !important;
+  color: var(--scope-color-selected-text) !important;
+}
+
+/* Ensure muted-colored cells also read correctly on the inverse fill. */
+.timelineRowSelected td .timelineMuted,
+.timelineRowSelected td .timelineKind,
+.timelineRowSelected td .timelineActorSub {
+  color: var(--scope-color-selected-text);
+  opacity: 0.8;
+}
+
+/* "Open detail" affordance link: shown only on the selected row.
+   Compact inline-flex, accent color, 44px min target. */
+.timelineDetailLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: 8px var(--scope-space-2);
+  color: var(--scope-color-accent);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--scope-radius-sm);
+  border: 1px solid var(--scope-color-accent);
+  white-space: nowrap;
+}
+
+.timelineDetailLink:hover {
+  background-color: var(--scope-color-accent-bg);
+}
+
+.timelineDetailLinkText {
+  font-size: var(--scope-font-size-xs);
+}
+
+/* ---- Timeline cell typography — replaces former inline px font sizes (#9) ----
+   All sizes use --scope-font-size-* scale tokens. No raw px allowed here. */
+
+/* Kind cell: muted mono label for non-event rows (request / span) */
+.timelineKind {
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+}
+
+/* Timestamp: monospaced, small */
+.timelineMono {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-xs);
+}
+
+/* Muted placeholder (em dash when no timestamp) */
+.timelineMuted {
+  color: var(--scope-color-text-muted);
+}
+
+/* Actor/tool title: semi-bold, default body size */
+.timelineActorTitle {
+  font-weight: 600;
+  font-size: var(--scope-font-size-sm);
+}
+
+/* Actor/tool subtitle: muted mono secondary line */
+.timelineActorSub {
+  display: block;
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+}
+
+/* StatusBadge in timeline rows: compact sizing to fit dense rows */
+.timelineStatusBadge {
+  font-size: var(--scope-font-size-xs);
+}
+
+/* ID cell: inline flex chip group (kept for compatibility) */
+.timelineIdCell {
+  display: inline-flex;
+  gap: var(--scope-space-1);
+}
+
+/* Ref column: alias displayed as a monospaced identifier (accent color) */
+.timelineRefAlias {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  color: var(--scope-color-accent);
+}
+
+/* ---- P2-4: Tab group labels (Session source / Detail view) ---- */
+/* Compact section-label paragraphs above each tab group.
+   Uppercase micro-label, muted, 4/8px grid spacing, no raw hex. */
+.pickerGroupLabel,
+.detailGroupLabel {
+  margin: 0;
+  padding: 0 2px;
+  font-size: var(--scope-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--scope-color-text-muted);
+  line-height: 1;
+}
+
+/* ---- P2-2: TraceCard progressive disclosure (details/summary) ---- */
+/* The <details> element wraps the entries section. Open by default (cardListOpen=true). */
+.entriesDisclosure {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Summary trigger for the disclosure. Styled as a compact secondary action.
+   min-height: var(--scope-target-min) ensures the 44px interactive target (WCAG 2.2 AA).
+   Padding provides the extra height while the visual appearance stays secondary/inline. */
+.entriesSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  padding: 6px 10px;
+  min-height: var(--scope-target-min);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text-muted);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  /* Ensure visible focus ring (WCAG 2.2 AA) */
+  outline-offset: 2px;
+}
+
+.entriesSummary:hover {
+  border-color: var(--scope-color-text-muted);
+  color: var(--scope-color-text);
+}
+
+/* Ensure the summary marker (triangle) is still visible but styled */
+.entriesDisclosure > summary::marker {
+  color: var(--scope-color-text-muted);
+}
+
+/* When open, add spacing between summary and content */
+.entriesDisclosure[open] > .entriesSummary {
+  margin-bottom: var(--scope-space-2);
+}
+
+/* Visually hidden — announces to screen readers but takes no visible space.
+   Use clip-rect (not display:none, which suppresses AT announcement). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

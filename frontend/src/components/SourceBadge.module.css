@@ -1,0 +1,42 @@
+.badge {
+  display: inline-block;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid;
+  border-radius: var(--scope-radius-sm);
+  padding: 0 6px;
+  line-height: 16px;
+  background-color: var(--scope-color-surface-raised);
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* Status-color modifier classes for the 4 source badge values.
+   Each source type maps to the nearest --scope-color-* product token per semantics:
+     exact  -> --scope-color-success  (host/provider-measured; certainty = success green)
+     wire   -> --scope-color-info     (provider wire usage; informational blue)
+     estimate -> --scope-color-warning (computed estimate; uncertain = warning amber)
+     unknown  -> --scope-color-text-muted (no value known; dimmed/neutral)
+*/
+.sourceExact {
+  color: var(--scope-color-success);
+  border-color: var(--scope-color-success);
+}
+
+.sourceWire {
+  color: var(--scope-color-info);
+  border-color: var(--scope-color-info);
+}
+
+.sourceEstimate {
+  color: var(--scope-color-warning);
+  border-color: var(--scope-color-warning);
+}
+
+.sourceUnknown {
+  color: var(--scope-color-text-muted);
+  border-color: var(--scope-color-border);
+}

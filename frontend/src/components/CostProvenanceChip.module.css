@@ -1,0 +1,99 @@
+/*
+ * CostProvenanceChip.module.css (FE-1)
+ *
+ * Renders a cost value with a provenance chip. Uses only --scope-color-* tokens.
+ * Tier classification (exact / estimated / none) drives chip color:
+ *   exact     -> accent/info tone (high confidence)
+ *   estimated -> warning tone (approximate)
+ *   none      -> muted (no cost available)
+ *
+ * Rule: null cost = em dash + Unmetered/Unavailable (never $0.00).
+ * Rule: aggregate variant = coverage text, NOT a mixed enum.
+ */
+
+/* Container for the cost value + optional basis line (stacked vertically). */
+.costBlock {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--scope-space-1);
+}
+
+.wrapper {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+}
+
+/* The cost value itself */
+.value {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text);
+}
+
+/* Em dash for null cost — visually distinct from $0.00 */
+.emDash {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+}
+
+/* The provenance chip */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--scope-space-2);
+  border-radius: var(--scope-radius-sm);
+  font-size: var(--scope-font-size-xs);
+  font-weight: 600;
+  line-height: var(--scope-line-height-tight);
+  white-space: nowrap;
+}
+
+/* Tier-based chip coloring */
+.chip[data-tier="exact"] {
+  color: var(--scope-color-info);
+  background-color: var(--scope-color-info-bg);
+  border: 1px solid var(--scope-color-info);
+}
+
+.chip[data-tier="estimated"] {
+  color: var(--scope-color-warning);
+  background-color: var(--scope-color-warning-bg);
+  border: 1px solid var(--scope-color-warning);
+}
+
+.chip[data-tier="none"] {
+  color: var(--scope-color-text-muted);
+  background-color: var(--scope-color-surface-2);
+  border: 1px solid var(--scope-color-border-subtle);
+}
+
+/* Coverage text for aggregate variant */
+.coverage {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/*
+ * Estimation basis detail line — rendered below the cost+chip pair when
+ * cost_estimation_basis is present (scope_estimated or provider_estimated).
+ *
+ * Color: --scope-color-text-muted for readability without distraction.
+ * No raw hex; no trace-tool tokens.
+ * Shape requirement: text-only, no left accent stripe.
+ * WCAG AA: --scope-color-text-muted meets 4.5:1 against --scope-color-surface in
+ * both light (#555F54 on #FFFBF1) and dark (#BAC3B5 on #171C18) themes per the
+ * design token table.
+ */
+.basisLine {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  font-style: italic;
+  line-height: var(--scope-line-height-tight);
+}

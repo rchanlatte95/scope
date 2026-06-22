@@ -1,0 +1,71 @@
+/*
+ * ExportCsvButton.module.css
+ *
+ * Design contract (2026-06-14 direction):
+ * - scope-* tokens only; no raw hex.
+ * - Sharp + geometric: corner radius --scope-radius-sm (2px) for small interactive controls.
+ * - 44px minimum touch/click target (--scope-target-min).
+ * - Visible focus ring in both themes via global :focus-visible rule in index.css.
+ * - Favor crisp 1px borders/dividers over soft shadows.
+ */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--scope-space-1);
+
+  /* 44px minimum touch target */
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-4);
+
+  /* Typography */
+  font-family: var(--scope-font-sans);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  line-height: var(--scope-line-height-tight);
+  white-space: nowrap;
+
+  /* Color — secondary action style */
+  color: var(--scope-color-accent);
+  background-color: var(--scope-color-accent-bg);
+  border: 1px solid var(--scope-color-accent);
+
+  /* Shape: 2px radius for small interactive control */
+  border-radius: var(--scope-radius-sm);
+
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.button:hover:not(:disabled) {
+  /* Subtle darkening on hover via border + slight opacity — no raw color */
+  background-color: var(--scope-color-surface-2);
+}
+
+.button:disabled,
+.button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Disabled reason notice — shown as inline text beneath the button */
+.disabledNotice {
+  display: block;
+  margin-top: var(--scope-space-1);
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* Icon container (download arrow or similar) */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.icon svg {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}

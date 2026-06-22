@@ -1,0 +1,554 @@
+/* =============================================================================
+   SECTION 0 — FONT FACES
+   Self-hosted fonts (SIL OFL 1.1 for all).
+   Files live in public/fonts/ and are served at /fonts/... by Vite.
+   font-display: swap keeps text visible during load.
+
+   Recursive (ArrowType, v1.085) — variable font covering MONO 0–1, CASL 0–1, slnt, CRSV.
+     UI surfaces:            MONO 0, CASL 0 (proportional, linear, upright)
+     Code/evidence surfaces: MONO 1, CASL 0 (monospaced, linear, upright)
+   Atkinson Hyperlegible (Braille Institute) — accessibility opt-in.
+   OpenDyslexic — accessibility opt-in.
+   ============================================================================= */
+
+@font-face {
+  font-family: "Recursive";
+  font-style: normal;
+  font-weight: 300 1000;
+  font-display: swap;
+  src: url('/fonts/Recursive_VF.woff2') format('woff2') supports(variations),
+       url('/fonts/Recursive_VF.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/AtkinsonHyperlegible-Bold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: "OpenDyslexic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/OpenDyslexic-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: "OpenDyslexic";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/OpenDyslexic-Bold.woff2') format('woff2');
+}
+
+/* =============================================================================
+   SCOPE TOKEN LAYER — index.css
+   Source of truth for all design tokens in the Scope SPA.
+
+   Layout:
+   0. Font faces (Recursive VF, Atkinson Hyperlegible, OpenDyslexic)
+   1. Token layer (verbatim from docs/front-end-guides/scope_theme_tokens.css)
+   2. System / prefers-color-scheme resolution
+   3. Display-preference attribute hooks (font-scale, readable-font, visual-cues)
+   5. Global reset and base styles
+   (Section 4 shim alias block removed FE-4c — all modules now use canonical --scope-* tokens)
+   ============================================================================= */
+
+/* =============================================================================
+   BREAKPOINT CONTRACT
+   Canonical primary mobile/desktop split: max-width: 768px
+     Mobile (<=768px): single-column layout, disclosure nav, card views.
+     Desktop (>=769px): two-column shell, persistent left rail, table views.
+
+   Sub-breakpoints (do NOT change via the primary split):
+     560px — CronView card field stacking
+     480px — CommandView/CostLedgerView narrow adjustments
+     400px — ScrollToTop compact position
+     360px — Pagination compact
+     320px — WCAG reflow minimum
+
+   NOTE: CSS @media conditions cannot use custom properties (var()), so the
+   literal value 768px must appear in each CSS module. PostCSS custom-media is
+   not wired up in this project (vite.config.ts uses no custom-media plugin).
+   ============================================================================= */
+
+/* =============================================================================
+   SECTION 1 — TOKEN LAYER
+   Verbatim from docs/front-end-guides/scope_theme_tokens.css (the binding token
+   source of truth). Both theme blocks are preserved exactly.
+
+   Light theme is the default (:root). Explicit data-theme="light" also applies
+   the light block. data-theme="dark" applies the dark block.
+   ============================================================================= */
+
+/* Scope MVP theme tokens
+   Use these variables as the only source of truth for color in React components.
+   Direct hex values outside this file should fail review.
+*/
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --scope-color-bg: #F6F1E7;
+  --scope-color-surface: #FFFBF1;
+  --scope-color-surface-2: #EAE1D1;
+  --scope-color-surface-raised: #FFFFFF;
+  --scope-color-text: #151916;
+  --scope-color-text-muted: #555F54;
+  --scope-color-border: #9C8F79;
+  --scope-color-border-subtle: #D9D0BE;
+  --scope-color-rail: #151A16;
+  --scope-color-rail-text: #F2EDDF;
+  --scope-color-rail-muted: #BAC3B5;
+
+  --scope-color-accent: #1F4BDB;
+  --scope-color-accent-bg: #E8EDFF;
+  /* Selected/active state (inverse fill block; replaces the left accent stripe). AA-verified:
+     white on this bg = 6.8:1 light, 6.0:1 dark. Saturated blue + white text in BOTH themes. */
+  --scope-color-selected-bg: #1F4BDB;
+  --scope-color-selected-text: #FFFFFF;
+  --scope-color-success: #08724C;
+  --scope-color-success-bg: #E1F4E9;
+  --scope-color-warning: #835000;
+  --scope-color-warning-bg: #FFF1D7;
+  --scope-color-danger: #A33A32;
+  --scope-color-danger-bg: #FFE7E5;
+  --scope-color-info: #0A5A93;
+  --scope-color-info-bg: #E3F2FF;
+
+  --scope-focus-ring: #151916;
+  --scope-focus-ring-offset: #FFFBF1;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --scope-color-bg: #0E1110;
+  --scope-color-surface: #171C18;
+  --scope-color-surface-2: #202720;
+  --scope-color-surface-raised: #1E251F;
+  --scope-color-text: #F2EDDF;
+  --scope-color-text-muted: #BAC3B5;
+  --scope-color-border: #60705F;
+  --scope-color-border-subtle: #344034;
+  --scope-color-rail: #101410;
+  --scope-color-rail-text: #F2EDDF;
+  --scope-color-rail-muted: #BAC3B5;
+
+  --scope-color-accent: #98AAFF;
+  --scope-color-accent-bg: #1F2948;
+  /* Selected/active state: saturated blue + white text (NOT the lighter dark accent, which fails
+     contrast under an inverse fill). white on #2E55E6 = 6.0:1 AA. */
+  --scope-color-selected-bg: #2E55E6;
+  --scope-color-selected-text: #FFFFFF;
+  --scope-color-success: #67D39F;
+  --scope-color-success-bg: #173024;
+  --scope-color-warning: #F0B75D;
+  --scope-color-warning-bg: #32240E;
+  --scope-color-danger: #FF9389;
+  --scope-color-danger-bg: #351A17;
+  --scope-color-info: #8BCBFF;
+  --scope-color-info-bg: #102B3F;
+
+  --scope-focus-ring: #F2EDDF;
+  --scope-focus-ring-offset: #171C18;
+}
+
+:root {
+  /* -------------------------------------------------------------------------
+     TYPOGRAPHY TOKENS
+     Recursive is the default UI and code font (variable, self-hosted).
+     Atkinson Hyperlegible and OpenDyslexic are accessibility opt-ins.
+
+     --scope-font-sans:    UI/body text — Recursive proportional (MONO 0)
+     --scope-font-mono:    Code/evidence surfaces — Recursive mono (MONO 1)
+     --scope-font-readable: Atkinson Hyperlegible opt-in
+     --scope-font-dyslexic: OpenDyslexic opt-in
+
+     --scope-recursive-ui-axes:   MONO 0, CASL 0 — proportional, linear, upright
+     --scope-recursive-code-axes: MONO 1, CASL 0 — monospaced, linear, upright
+     Do NOT set CASL above 0 anywhere in this product.
+     Do NOT pin the wght axis here — ordinary font-weight drives weight.
+     ------------------------------------------------------------------------- */
+  --scope-font-sans: "Recursive", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --scope-font-readable: "Atkinson Hyperlegible", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --scope-font-dyslexic: "OpenDyslexic", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --scope-font-mono: "Recursive", "Cascadia Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+
+  --scope-recursive-ui-axes: "MONO" 0, "CASL" 0, "slnt" 0, "CRSV" 0;
+  --scope-recursive-code-axes: "MONO" 1, "CASL" 0, "slnt" 0, "CRSV" 0;
+
+  /* Shape: sharp + geometric (2026-06-14 direction). Default radius is 0; the ONLY non-zero
+     radius is --scope-radius-sm (2px), reserved for SMALL interactive controls (buttons,
+     inputs, chips, toggles). Cards, panels, modals, tables, badges, and the shell are square.
+     --scope-radius-md and --scope-radius-lg are kept at 0 as legacy aliases; prefer
+     --scope-radius-none for explicit intent. */
+  --scope-radius-none: 0;
+  --scope-radius-sm: 2px;   /* small interactive controls ONLY */
+  --scope-radius-md: 0;     /* legacy alias -> sharp; prefer --scope-radius-none */
+  --scope-radius-lg: 0;     /* legacy alias -> sharp; prefer --scope-radius-none */
+
+  --scope-space-1: 4px;
+  --scope-space-2: 8px;
+  --scope-space-3: 12px;
+  --scope-space-4: 16px;
+  --scope-space-5: 20px;
+  --scope-space-6: 24px;
+  --scope-space-8: 32px;
+
+  --scope-font-size-xs: 0.75rem;
+  --scope-font-size-sm: 0.875rem;
+  --scope-font-size-md: 1rem;
+  --scope-font-size-lg: 1.125rem;
+  --scope-font-size-xl: 1.5rem;
+  --scope-font-size-2xl: 2rem;
+
+  --scope-line-height-tight: 1.2;
+  --scope-line-height-normal: 1.5;
+
+  --scope-target-min: 44px;
+  --scope-focus-width: 3px;
+  --scope-focus-offset: 3px;
+
+  /* Shadow tokens — raw rgba defined here (token layer) so components reference via var(). */
+  --scope-shadow-tooltip: 0 6px 18px rgba(0, 0, 0, 0.45);
+
+  /* =============================================================================
+     CHART SERIES TOKENS — cost ledger area charts (T-05b).
+     Colorblind-safe 3-step palette:
+       series-1: accent-adjacent blue (IBM Blue #648FFF) — primary series (spend line)
+       series-2: orange (#FE6100 = pack token) — secondary series (bar chart A)
+       series-3: teal/emerald (#2eb88a = operator token) — tertiary series (bar chart B)
+     Derived from existing trace-tool palette; no novel hex. Dark and light differ per
+     existing theme distinction ratios. Never used as the sole status indicator.
+     ============================================================================= */
+  /* Generic chart series — Okabe-Ito CVD-safe palette, DISTINCT from trace-tool hues.
+     These are for GENERIC series (spend over time, by agent, by model).
+     Do NOT reuse for spend-by-tool-type: those use --scope-trace-tool-* tokens.
+     Palette: Okabe-Ito blue / bluish-green / reddish-purple / vermilion / sky-blue.
+     FLAG FOR OWNER: series-1=#0072B2 (cerulean), series-2=#009E73 (bluish-green),
+     series-3=#CC79A7 (reddish-purple), series-4=#D55E00 (vermilion), series-5=#56B4E9 (sky-blue).
+     All are perceptually distinct in deuteranopia/protanopia/tritanopia simulations. */
+  --scope-color-chart-series-1: #0072B2;
+  --scope-color-chart-series-2: #009E73;
+  --scope-color-chart-series-3: #CC79A7;
+  --scope-color-chart-series-4: #D55E00;
+  --scope-color-chart-series-5: #56B4E9;
+  --scope-color-chart-grid: #D9D0BE;
+  --scope-color-chart-axis: #9C8F79;
+}
+
+/* =============================================================================
+   SECTION 1b — TRACE-TOOL TOKENS
+   Defines the 9 --scope-trace-tool-* bucket tokens for tool-type identity in
+   trace surfaces. FROZEN hex values (FE-4b self-inlines a copy — do not change
+   without also updating HtmlTraceFormatter.cs).
+
+   Bucket identity and canonical dark-theme anchor (per decision trace-tool-buckets):
+     find     #648FFF  — semantic search / retrieval (blue-violet)
+     pack     #FE6100  — context-pack / token budgeting (orange)
+     hook     #DC267F  — lifecycle hooks / pre/post-tool events (magenta-rose)
+     edit     #3FB950  — file write / edit operations (green)
+     model    #56D4DD  — model message / LLM call (cyan, hue 184)
+     shell    #A371F7  — shell / bash execution (violet)
+     external #785EF0  — MCP + web + external API calls (indigo)
+     operator #2eb88a  — human-in-the-loop: approvals, AskUserQuestion (emerald,
+                         hue 160, RESERVED GLYPH: person-raise-hand / hand-raised
+                         icon for FE-1 ToolTypeMark to consume)
+     system   #FFB000  — local/passive: file-read, glob, status, generic tool (amber)
+
+   FROZEN FINAL HEX TABLE (values verified WCAG contrast >= 3:1 against worst
+   container surface per theme; see FE-0b task report for full computed ratios):
+   +----------+----------+----------+
+   | Bucket   | Light    | Dark     |
+   +----------+----------+----------+
+   | find     | #618dff  | #648FFF  |
+   | pack     | #fa5f00  | #FE6100  |
+   | hook     | #DC267F  | #DC267F  |
+   | edit     | #39a648  | #3FB950  |
+   | model    | #249fa8  | #56D4DD  |
+   | shell    | #A371F7  | #A371F7  |
+   | external | #785EF0  | #785EF0  |
+   | operator | #1f936d  | #2eb88a  |
+   | system   | #c28600  | #FFB000  |
+   +----------+----------+----------+
+
+   operator vs model perceptual distinctness (CVD-safe):
+     Hue delta: 24 degrees (operator hue 160 emerald vs model hue 184 cyan).
+     Blue channel delta: 59 (light) / 83 (dark) — preserved under deutan/protan CVD.
+     Luminance delta: 0.057 light / 0.176 dark (operator darker in both themes).
+     Tritan: emerald vs cyan remain distinct on the blue-yellow confusion axis.
+     Grayscale: operator is visibly darker than model, especially in dark theme.
+     Contract: color is never the sole status indicator; ToolTypeMark glyph+label
+     distinguish buckets when color perception is impaired.
+
+   RESERVED OPERATOR GLYPH for FE-1 ToolTypeMark:
+     Icon: person-raise-hand (hand-raised / raise-hand / approval glyph).
+     Rationale: operator = human-in-the-loop action (AskUserQuestion, approval,
+     manual intervention). All other buckets use tool/action glyphs; the raise-hand
+     person glyph is semantically unique and immediately communicates human involvement.
+   ============================================================================= */
+
+/* Light theme trace-tool tokens */
+:root,
+[data-theme="light"] {
+  --scope-trace-tool-find:     #618dff;
+  --scope-trace-tool-pack:     #fa5f00;
+  --scope-trace-tool-hook:     #DC267F;
+  --scope-trace-tool-edit:     #39a648;
+  --scope-trace-tool-model:    #249fa8;
+  --scope-trace-tool-shell:    #A371F7;
+  --scope-trace-tool-external: #785EF0;
+  --scope-trace-tool-operator: #1f936d;
+  --scope-trace-tool-system:   #c28600;
+}
+
+/* Dark theme trace-tool tokens */
+[data-theme="dark"] {
+  --scope-trace-tool-find:     #648FFF;
+  --scope-trace-tool-pack:     #FE6100;
+  --scope-trace-tool-hook:     #DC267F;
+  --scope-trace-tool-edit:     #3FB950;
+  --scope-trace-tool-model:    #56D4DD;
+  --scope-trace-tool-shell:    #A371F7;
+  --scope-trace-tool-external: #785EF0;
+  --scope-trace-tool-operator: #2eb88a;
+  --scope-trace-tool-system:   #FFB000;
+}
+
+/* Dark theme chart series tokens */
+[data-theme="dark"] {
+  /* Generic chart series — Okabe-Ito CVD-safe palette (dark theme brightness uplift).
+     DISTINCT from trace-tool hues. See :root block comment for palette rationale. */
+  --scope-color-chart-series-1: #4EAEE5;
+  --scope-color-chart-series-2: #00C896;
+  --scope-color-chart-series-3: #E091BF;
+  --scope-color-chart-series-4: #E87040;
+  --scope-color-chart-series-5: #89CCF0;
+  --scope-color-chart-grid: #344034;
+  --scope-color-chart-axis: #60705F;
+}
+
+/* System-dark first-paint: activates dark values when OS prefers dark and no
+   explicit data-theme is set, mirroring the pattern in Section 2. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  [data-theme="system"] {
+    --scope-color-chart-series-1: #4EAEE5;
+    --scope-color-chart-series-2: #00C896;
+    --scope-color-chart-series-3: #E091BF;
+    --scope-color-chart-series-4: #E87040;
+    --scope-color-chart-series-5: #89CCF0;
+    --scope-color-chart-grid: #344034;
+    --scope-color-chart-axis: #60705F;
+  }
+}
+
+/* System-dark first-paint: activates dark values when OS prefers dark and no
+   explicit data-theme is set, mirroring the pattern in Section 2. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  [data-theme="system"] {
+    --scope-trace-tool-find:     #648FFF;
+    --scope-trace-tool-pack:     #FE6100;
+    --scope-trace-tool-hook:     #DC267F;
+    --scope-trace-tool-edit:     #3FB950;
+    --scope-trace-tool-model:    #56D4DD;
+    --scope-trace-tool-shell:    #A371F7;
+    --scope-trace-tool-external: #785EF0;
+    --scope-trace-tool-operator: #2eb88a;
+    --scope-trace-tool-system:   #FFB000;
+  }
+}
+
+:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* =============================================================================
+   SECTION 2 — SYSTEM / prefers-color-scheme RESOLUTION
+   When data-theme="system" (or is unset), the OS dark-mode preference activates
+   the dark token values. Explicit data-theme="light" and data-theme="dark" above
+   always win because they are unconditional and cascade later than this block.
+
+   Selectors:
+     :root:not([data-theme])     — attribute absent (before prefs load, first paint)
+     [data-theme="system"]       — explicit system preference
+   Both are scoped under the OS media query so they only activate for dark OS.
+   ============================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]),
+  [data-theme="system"] {
+    color-scheme: dark;
+
+    --scope-color-bg: #0E1110;
+    --scope-color-surface: #171C18;
+    --scope-color-surface-2: #202720;
+    --scope-color-surface-raised: #1E251F;
+    --scope-color-text: #F2EDDF;
+    --scope-color-text-muted: #BAC3B5;
+    --scope-color-border: #60705F;
+    --scope-color-border-subtle: #344034;
+    --scope-color-rail: #101410;
+    --scope-color-rail-text: #F2EDDF;
+    --scope-color-rail-muted: #BAC3B5;
+
+    --scope-color-accent: #98AAFF;
+    --scope-color-accent-bg: #1F2948;
+    --scope-color-selected-bg: #2E55E6;
+    --scope-color-selected-text: #FFFFFF;
+    --scope-color-success: #67D39F;
+    --scope-color-success-bg: #173024;
+    --scope-color-warning: #F0B75D;
+    --scope-color-warning-bg: #32240E;
+    --scope-color-danger: #FF9389;
+    --scope-color-danger-bg: #351A17;
+    --scope-color-info: #8BCBFF;
+    --scope-color-info-bg: #102B3F;
+
+    --scope-focus-ring: #F2EDDF;
+    --scope-focus-ring-offset: #171C18;
+  }
+}
+
+/* =============================================================================
+   SECTION 3 — DISPLAY-PREFERENCE ATTRIBUTE HOOKS
+
+   These are applied at the document root (<html>) by prefs.ts + main.tsx.
+   data-theme: system | light | dark  (handled in sections 1+2)
+   data-font-scale: 100 | 115 | 130   (scales the root rem base)
+   data-readable-font: off | atkinson | opendyslexic  (readable-font choice)
+   data-visual-cues: standard | strong (reserved for later lanes — no-op CSS here)
+   ============================================================================= */
+
+[data-font-scale="115"] {
+  font-size: 115%;
+}
+
+[data-font-scale="130"] {
+  font-size: 130%;
+}
+
+/* data-readable-font="atkinson": override Recursive with Atkinson Hyperlegible
+   for BOTH UI body text and code/evidence surfaces. Also resets font-variation-settings
+   so Recursive's MONO/CASL axes do not bleed into Atkinson glyphs.
+   data-readable-font="opendyslexic": same for OpenDyslexic.
+   Both are self-hosted WOFF2 in public/fonts/ (SIL OFL).
+   Existing stored value "on" migrates to "atkinson" on read in prefs.ts.
+
+   The token overrides on [data-readable-font] reset --scope-recursive-ui-axes and
+   --scope-recursive-code-axes to "normal", which propagates through var() references
+   in module CSS (e.g. font-variation-settings: var(--scope-recursive-code-axes))
+   without needing per-element selectors. Font-family overrides on body/code/pre/kbd/samp
+   cover the HTML semantic elements; the token reset covers all module CSS consumers. */
+[data-readable-font="atkinson"] {
+  --scope-recursive-ui-axes: normal;
+  --scope-recursive-code-axes: normal;
+  --scope-font-sans: var(--scope-font-readable);
+  --scope-font-mono: var(--scope-font-readable);
+}
+
+[data-readable-font="atkinson"] body,
+[data-readable-font="atkinson"] code,
+[data-readable-font="atkinson"] pre,
+[data-readable-font="atkinson"] kbd,
+[data-readable-font="atkinson"] samp {
+  font-family: var(--scope-font-readable);
+  font-variation-settings: normal;
+}
+
+[data-readable-font="opendyslexic"] {
+  --scope-recursive-ui-axes: normal;
+  --scope-recursive-code-axes: normal;
+  --scope-font-sans: var(--scope-font-dyslexic);
+  --scope-font-mono: var(--scope-font-dyslexic);
+}
+
+[data-readable-font="opendyslexic"] body,
+[data-readable-font="opendyslexic"] code,
+[data-readable-font="opendyslexic"] pre,
+[data-readable-font="opendyslexic"] kbd,
+[data-readable-font="opendyslexic"] samp {
+  font-family: var(--scope-font-dyslexic);
+  font-variation-settings: normal;
+}
+
+/* data-visual-cues: reserved attribute; CSS consumers added by later lanes (FE-0d+). */
+/* [data-visual-cues="strong"] { } */
+
+/* =============================================================================
+   SECTION 5 — GLOBAL RESET AND BASE STYLES
+   ============================================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+html,
+body {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--scope-font-sans);
+  font-variation-settings: var(--scope-recursive-ui-axes);
+  font-size: 1rem;
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-bg);
+}
+
+/* Code and evidence surfaces: Recursive MONO axis (MONO 1).
+   All elements that already set font-family: var(--scope-font-mono) via CSS modules
+   will inherit the correct font; font-variation-settings here ensures MONO 1 applies
+   even to elements that don't explicitly override it.
+   font-feature-settings disables ligatures in code contexts (readability in dense code).
+   font-variant-numeric: tabular-nums aligns numeric columns in tables/metrics. */
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-variant-numeric: tabular-nums;
+}
+
+pre,
+code {
+  font-feature-settings: "liga" 0, "calt" 0;
+}

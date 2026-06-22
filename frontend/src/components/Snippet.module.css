@@ -1,0 +1,66 @@
+.snippet {
+  margin-top: 8px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--scope-color-border);
+  background-color: var(--scope-color-surface);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--scope-color-text-muted);
+}
+
+.meta {
+  font-size: 10px;
+  color: var(--scope-color-text-muted);
+  font-family: Consolas, 'Cascadia Mono', monospace;
+}
+
+.body {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 420px;
+  overflow: auto;
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--scope-color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--scope-color-border);
+}
+
+/* --clr-find -> --scope-color-accent: these are generic "show more / collapse" interactive
+   action buttons in a snippet viewer, not trace-tool visualizations. Accent is the correct
+   product token for interactive text actions/links. */
+.actions button {
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: var(--scope-color-accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.actions button:hover {
+  text-decoration: underline;
+}

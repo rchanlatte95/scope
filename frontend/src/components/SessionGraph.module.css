@@ -1,0 +1,124 @@
+/* SessionGraph.module.css — FE-4c shim retirement.
+   All colors use --scope-color-* and --scope-trace-tool-* tokens (direct canonical names).
+   SessionGraph is a sanctioned consumer of --scope-trace-tool-* (TraceTimeline role).
+   No raw hex. No shim aliases. Node fills use --scope-color-surface-2 and --scope-color-bg. */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none);
+  background-color: var(--scope-color-surface);
+  overflow: hidden;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--scope-color-border);
+  background-color: var(--scope-color-surface-raised);
+}
+
+.controls button {
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface);
+  color: var(--scope-color-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.controls button:hover {
+  border-color: var(--scope-color-text-muted);
+}
+
+.zoomReadout {
+  margin-left: auto;
+  color: var(--scope-color-text-muted);
+  font-size: 11px;
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+}
+
+/* BOUNDED viewport (item 1): fixed height frame that clips; never grows the page. */
+.frame {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  max-height: 50vh;
+  overflow: hidden;
+  cursor: grab;
+  background-image: radial-gradient(var(--scope-color-border) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.frame:active {
+  cursor: grabbing;
+}
+
+.canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  user-select: none;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--scope-color-text-muted);
+  stroke-width: 1.6;
+  opacity: 0.55;
+}
+
+.edge[data-link-source='span_enrichment'] {
+  stroke-dasharray: 5 3;
+}
+
+.node {
+  cursor: pointer;
+}
+
+.node rect {
+  stroke-width: 1.6;
+  transition: filter 0.12s ease;
+}
+
+/* Session nodes: surface-2 fill, find-bucket stroke (session = search/retrieval context) */
+.session rect {
+  fill: var(--scope-color-surface-2);
+  stroke: var(--scope-trace-tool-find);
+}
+
+/* Span nodes: bg fill, shell-bucket stroke (span = execution/processing context) */
+.span rect {
+  fill: var(--scope-color-bg);
+  stroke: var(--scope-trace-tool-shell);
+}
+
+.node:hover rect {
+  filter: brightness(1.15);
+}
+
+/* Selected node: warning color border (status semantics, not tool-type) */
+.selected rect {
+  stroke: var(--scope-color-warning);
+  stroke-width: 2.6;
+}
+
+.nodeAlias {
+  fill: var(--scope-color-text);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.nodeLabel {
+  fill: var(--scope-color-text-muted);
+  font-size: 10px;
+}

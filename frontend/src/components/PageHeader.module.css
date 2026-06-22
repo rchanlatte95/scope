@@ -1,0 +1,115 @@
+/*
+ * PageHeader.module.css (FE-1)
+ *
+ * Page header area: H1 area name, workspace/repo context, current location,
+ * optional freshness, optional status chips, at most ONE dominant primary action.
+ *
+ * H1 size: 24–32px per design-doc section 6 (font-size-xl = 1.5rem = 24px base).
+ * Uses only --scope-color-* tokens. No raw hex.
+ */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+  padding: var(--scope-space-6) 0 var(--scope-space-4) 0;
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  margin-bottom: var(--scope-space-6);
+}
+
+/* Top row: title + primary action */
+.topRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--scope-space-4);
+  flex-wrap: wrap;
+}
+
+/* H1 area name */
+.title {
+  font-size: var(--scope-font-size-xl); /* 1.5rem = 24px base */
+  font-weight: 700;
+  line-height: var(--scope-line-height-tight);
+  color: var(--scope-color-text);
+  margin: 0;
+  /* Allow H1 to grow up to 32px at 130% font scale via relative sizing */
+}
+
+/* Workspace / repo context line */
+.context {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  font-family: var(--scope-font-mono);
+  font-variation-settings: var(--scope-recursive-code-axes);
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+}
+
+.contextSeparator {
+  color: var(--scope-color-border);
+  user-select: none;
+}
+
+/* Breadcrumb / current location */
+.breadcrumb {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  flex-wrap: wrap;
+}
+
+.breadcrumbSeparator {
+  color: var(--scope-color-border);
+  user-select: none;
+  font-size: var(--scope-font-size-xs);
+}
+
+/* Freshness label */
+.freshness {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* Status chips row */
+.statusChips {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+}
+
+/* Meta row: context + freshness + status chips */
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-4);
+  flex-wrap: wrap;
+}
+
+/* Primary action area — at most ONE dominant action */
+.primaryAction {
+  flex-shrink: 0;
+}
+
+/* Primary action button styling (if using a plain button) */
+.primaryAction :global(button),
+.primaryAction :global(a) {
+  min-height: var(--scope-target-min); /* 44px */
+  padding: var(--scope-space-2) var(--scope-space-4);
+  background-color: var(--scope-color-accent);
+  color: var(--scope-color-surface);
+  border: none;
+  border-radius: var(--scope-radius-sm);
+  font-size: var(--scope-font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+}

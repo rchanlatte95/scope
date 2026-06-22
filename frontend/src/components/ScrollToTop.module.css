@@ -1,0 +1,78 @@
+/* ScrollToTop.module.css — T-2026-06-13-50.
+   Fixed-position floating button; always uses --scope-* tokens, no raw hex.
+   44px minimum target (--scope-target-min). Visible focus both themes. */
+
+.btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  min-width: var(--scope-target-min);
+  min-height: var(--scope-target-min);
+  padding: 0 14px;
+
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+
+  /* Smooth opacity transition for show/hide (respects prefers-reduced-motion via CSS). */
+  opacity: 1;
+  transition: opacity 0.2s, box-shadow 0.15s;
+  box-shadow: 0 2px 8px var(--scope-color-border);
+}
+
+/* Hidden state: keep in DOM but invisible and non-interactive.
+   aria-hidden + tabIndex=-1 handle screen-reader/keyboard exclusion;
+   CSS pointer-events:none prevents accidental hover/click.
+   opacity:0 is a visual fade rather than display:none to allow CSS transition. */
+.btn[aria-hidden="true"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.btn:hover:not([aria-hidden="true"]) {
+  background-color: var(--scope-color-surface-2);
+  border-color: var(--scope-color-text-muted);
+}
+
+.btn:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.label {
+  /* Visible text label; also read by screen readers alongside aria-label. */
+  line-height: 1;
+}
+
+/* Respect reduced motion: disable the opacity transition. */
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+}
+
+/* At 320px/200% zoom: ensure button doesn't overflow the viewport.
+   Nudge inward so it stays within the gutter. */
+@media (max-width: 400px) {
+  .btn {
+    right: 12px;
+    bottom: 16px;
+  }
+}

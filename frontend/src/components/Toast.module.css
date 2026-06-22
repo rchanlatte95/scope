@@ -1,0 +1,115 @@
+/* Toast.module.css (ST-03)
+ *
+ * Design rules:
+ *   - Semantic scope-* tokens only (no raw hex).
+ *   - Sharp corners (--scope-radius-none = 0) for the card.
+ *   - --scope-radius-sm (2px) on action + dismiss buttons (small interactive controls).
+ *   - 4/8px spacing grid via --scope-space-* tokens.
+ *   - 1px line border, no box-shadow on the card (lines over shadows; floating
+ *     layers may use shadow per the design doc -- toasts ARE floating, so a
+ *     minimal shadow is permitted, but we skip it and use the border for clarity).
+ *   - Fixed bottom-right position, stacking upward.
+ *   - prefers-reduced-motion: no transition.
+ */
+
+/* Stack: the aria-live region and positional wrapper. */
+.stack {
+  position: fixed;
+  bottom: var(--scope-space-6);    /* 24px from bottom edge */
+  right: var(--scope-space-6);     /* 24px from right edge */
+  z-index: 200;
+  display: flex;
+  flex-direction: column-reverse;  /* new toasts appear at bottom; stack grows upward */
+  gap: var(--scope-space-2);       /* 8px between toasts */
+  max-width: 420px;
+  width: calc(100vw - var(--scope-space-8)); /* generous but bounded on narrow screens */
+  pointer-events: none;            /* allow pass-through on the container */
+}
+
+/* Individual toast card. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--scope-space-2);       /* 8px between glyph, message, action, dismiss */
+  padding: var(--scope-space-3) var(--scope-space-4); /* 12px 16px */
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-none); /* sharp card -- 0 */
+  pointer-events: auto;            /* toasts themselves are interactive */
+  min-height: var(--scope-target-min); /* 44px minimum height for accessibility */
+}
+
+/* Glyph-block: status-colored square + glyph (design-doc "status glyph-block" pattern).
+ * Uses info color to pair with info-bg. No left accent stripe. */
+.glyphBlock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--scope-space-6);     /* 24px square */
+  height: var(--scope-space-6);
+  background-color: var(--scope-color-info-bg);
+  color: var(--scope-color-info);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 700;
+  border-radius: var(--scope-radius-none);
+  user-select: none;
+}
+
+/* Message text: fills remaining space. */
+.message {
+  flex: 1;
+  font-size: var(--scope-font-size-sm);
+  line-height: var(--scope-line-height-normal);
+  color: var(--scope-color-text);
+  word-break: break-word;
+}
+
+/* Action button: the Undo / custom action. Real <button>, 44px min target. */
+.action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-3);  /* 0 12px */
+  background: transparent;
+  color: var(--scope-color-accent);
+  border: 1px solid var(--scope-color-accent);
+  border-radius: var(--scope-radius-sm); /* 2px -- small interactive control */
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.action:hover {
+  background-color: var(--scope-color-accent-bg);
+}
+
+/* Dismiss button: the x close control. 44px min target. */
+.dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--scope-target-min);
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-2);
+  background: transparent;
+  color: var(--scope-color-text-muted);
+  border: none;
+  border-radius: var(--scope-radius-sm); /* 2px -- small interactive control */
+  font-size: var(--scope-font-size-md);
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface-2);
+}
+
+/* Focus is handled by the global :focus-visible rule in index.css / scope_theme_tokens.css,
+ * which applies outline: var(--scope-focus-width) solid var(--scope-focus-ring).
+ * No additional overrides needed; the global rule covers both themes. */

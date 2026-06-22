@@ -1,0 +1,217 @@
+/*
+ * SettingsView.module.css (FE-2b)
+ *
+ * Tabbed Settings area: Accessibility tab (real) + Workspace tab (stub).
+ * ARIA tablist/tab/tabpanel semantics with keyboard arrow navigation.
+ *
+ * Token rule: NO raw hex. Only --scope-color-* and --scope-* tokens.
+ * 44px minimum touch/click target on all interactive controls.
+ */
+
+/* Page container */
+.view {
+  max-width: 720px;
+  padding: var(--scope-space-6);
+}
+
+/* ---------------------------------------------------------------------------
+   Tab bar
+--------------------------------------------------------------------------- */
+
+.tabList {
+  display: flex;
+  gap: var(--scope-space-1);
+  border-bottom: 1px solid var(--scope-color-border-subtle);
+  margin-bottom: var(--scope-space-6);
+  padding-bottom: 0;
+}
+
+.tab {
+  /* Reset button defaults */
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+
+  /* Layout and sizing (min 44px target height) */
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-4);
+  margin-bottom: -1px; /* overlap border-bottom of tabList */
+
+  /* Typography */
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  color: var(--scope-color-text-muted);
+  border-radius: var(--scope-radius-none);
+
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.tab:hover {
+  color: var(--scope-color-text);
+  background-color: var(--scope-color-surface-2);
+}
+
+/* Active tab: underline + text color + never color alone (font-weight change) */
+.tabActive {
+  color: var(--scope-color-accent);
+  border-bottom-color: var(--scope-color-accent);
+  font-weight: 700;
+  background-color: transparent;
+}
+
+.tabActive:hover {
+  background-color: var(--scope-color-accent-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   Tab panels
+--------------------------------------------------------------------------- */
+
+.tabPanel {
+  outline: none;
+}
+
+.tabPanel:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+/* ---------------------------------------------------------------------------
+   Accessibility tab content
+--------------------------------------------------------------------------- */
+
+.tabContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-6);
+}
+
+.tabDescription {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  line-height: var(--scope-line-height-normal);
+  margin: 0 0 var(--scope-space-2) 0;
+}
+
+/* Fieldset: reset browser defaults, use as a logical group */
+.fieldset {
+  border: 1px solid var(--scope-color-border-subtle);
+  border-radius: var(--scope-radius-none);
+  padding: var(--scope-space-4) var(--scope-space-5);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-3);
+}
+
+.legend {
+  font-size: var(--scope-font-size-sm);
+  font-weight: 700;
+  color: var(--scope-color-text);
+  padding: 0 var(--scope-space-2);
+  /* Float legend outside the fieldset border at top */
+}
+
+.fieldHelp {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  line-height: var(--scope-line-height-normal);
+  margin: 0;
+}
+
+/* Radio group: horizontal row of labeled options */
+.radioGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--scope-space-3);
+}
+
+/* Radio label: the clickable area, minimum 44px touch target */
+.radioLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  cursor: pointer;
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  border-radius: var(--scope-radius-sm);
+  border: 1px solid var(--scope-color-border-subtle);
+  background-color: var(--scope-color-surface);
+  transition: background-color 0.1s, border-color 0.1s;
+}
+
+.radioLabel:hover {
+  background-color: var(--scope-color-surface-2);
+  border-color: var(--scope-color-border);
+}
+
+/* When the radio inside is checked, highlight the label */
+.radioLabel:has(.radioInput:checked) {
+  background-color: var(--scope-color-accent-bg);
+  border-color: var(--scope-color-accent);
+}
+
+.radioInput {
+  /* Native radio input: preserve accessible appearance */
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--scope-color-accent);
+  flex-shrink: 0;
+}
+
+.radioText {
+  font-size: var(--scope-font-size-sm);
+  font-weight: 500;
+  color: var(--scope-color-text);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Workspace tab: select control for timezone and future settings
+--------------------------------------------------------------------------- */
+
+.selectGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--scope-space-2);
+}
+
+.selectLabel {
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  color: var(--scope-color-text);
+}
+
+.select {
+  /* Sizing: min 44px height for touch target */
+  min-height: var(--scope-target-min);
+  padding: var(--scope-space-2) var(--scope-space-3);
+  max-width: 320px;
+  width: 100%;
+
+  /* Appearance */
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface);
+  color: var(--scope-color-text);
+  font-size: var(--scope-font-size-sm);
+  cursor: pointer;
+
+  /* Accessible focus ring */
+  outline: none;
+}
+
+.select:focus-visible {
+  outline: var(--scope-focus-width) solid var(--scope-focus-ring);
+  outline-offset: var(--scope-focus-offset);
+}
+
+.select:hover {
+  border-color: var(--scope-color-border-strong, var(--scope-color-border));
+  background-color: var(--scope-color-surface-2);
+}

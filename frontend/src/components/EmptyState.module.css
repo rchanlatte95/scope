@@ -1,0 +1,89 @@
+/*
+ * EmptyState.module.css (FE-1)
+ *
+ * Variant: governance | neutral
+ *
+ * Governance variant: text + glyph ONLY (no decorative img/svg).
+ * Used for security/cost/failed states. The design doc says:
+ *   "Do not use cheerful illustrations for security, cost, or failed agent states."
+ *
+ * Neutral variant: may use a simple decorative glyph or visual element.
+ * Still NO heavy illustrations or animations.
+ *
+ * Uses only --scope-color-* tokens. No raw hex.
+ */
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--scope-space-8) var(--scope-space-6);
+  gap: var(--scope-space-3);
+  min-height: 200px;
+}
+
+/* Glyph/icon area (for functional icons only — aria-hidden SVGs) */
+.glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--scope-radius-none);
+  flex-shrink: 0;
+}
+
+.glyph svg {
+  width: 28px;
+  height: 28px;
+}
+
+/* Governance variant: danger/warning tone glyph + muted background */
+.emptyState[data-variant="governance"] .glyph {
+  background-color: var(--scope-color-danger-bg);
+  color: var(--scope-color-danger);
+}
+
+/* Neutral variant: muted tone glyph */
+.emptyState[data-variant="neutral"] .glyph {
+  background-color: var(--scope-color-surface-2);
+  color: var(--scope-color-text-muted);
+}
+
+/* Heading */
+.heading {
+  font-size: var(--scope-font-size-lg);
+  font-weight: 700;
+  color: var(--scope-color-text);
+  margin: 0;
+}
+
+/* Description */
+.description {
+  font-size: var(--scope-font-size-sm);
+  color: var(--scope-color-text-muted);
+  max-width: 40ch;
+  line-height: var(--scope-line-height-normal);
+  margin: 0;
+}
+
+/* Optional action */
+.action {
+  margin-top: var(--scope-space-2);
+}
+
+.action :global(button),
+.action :global(a) {
+  min-height: var(--scope-target-min); /* 44px */
+  padding: var(--scope-space-2) var(--scope-space-4);
+  border-radius: var(--scope-radius-sm);
+  font-size: var(--scope-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+}

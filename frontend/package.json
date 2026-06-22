@@ -1,0 +1,49 @@
+{
+  "name": "scope-trace-frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run lint",
+    "build:app": "vite build",
+    "build": "npm run check && npm run build:app",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
+    "@visx/axis": "^4.0.0",
+    "@visx/group": "^4.0.0",
+    "@visx/responsive": "^4.0.0",
+    "@visx/scale": "^4.0.0",
+    "@visx/shape": "^4.0.0",
+    "cronstrue": "^3.14.0",
+    "papaparse": "^5.5.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "use-debounce": "^10.1.1"
+  },
+  "devDependencies": {
+    "@evilmartians/lefthook": "^2.1.9",
+    "@playwright/test": "1.60.0",
+    "@tanstack/react-query-devtools": "^5.101.0",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.61.0",
+    "vite": "8.0.16",
+    "vitest": "3.2.6"
+  }
+}

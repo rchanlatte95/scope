@@ -1,0 +1,8 @@
+﻿[*.cs]
+# Align `dotnet format` with the repo's line endings (git core.autocrlf=input stores LF).
+# Without this, dotnet format defaults to the OS newline (CRLF on Windows) and the
+# `dotnet format --verify-no-changes` gate can never stay green. (T-2026-06-18 format-gate fix.)
+end_of_line = lf
+
+# CS8321: Local function is declared but never used
+dotnet_diagnostic.CS8321.severity = none
