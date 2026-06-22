@@ -550,7 +550,13 @@ public sealed record WireCallDto(
     [property: JsonPropertyName("first_user_hash")] string? FirstUserHash,
     [property: JsonPropertyName("message_count")] int? MessageCount,
     [property: JsonPropertyName("request_bytes")] long? RequestBytes,
-    [property: JsonPropertyName("response_bytes")] long? ResponseBytes);
+    [property: JsonPropertyName("response_bytes")] long? ResponseBytes,
+    // Row provenance (T-2026-06-22-01, Piece 5). Honest source tag from wire_calls.source (schema v3):
+    // "proxy" for proxy-metered rows, "transcript" for turns reconstructed from the Claude Code session
+    // transcript. Additive at the end with a default so existing positional construction and serialized
+    // shapes are unaffected; legacy/pre-v3 rows that lacked the column read "proxy" (the schema DEFAULT).
+    // Content-free: a closed provenance enum, never free text.
+    [property: JsonPropertyName("source")] string Source = "proxy");
 
 /// <summary>
 /// Body for kind=wire. <c>available</c> is false (with an empty <c>calls</c> list) when the
