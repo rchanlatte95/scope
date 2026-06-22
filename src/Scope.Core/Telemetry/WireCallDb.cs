@@ -35,7 +35,8 @@ public record WireCallRecord(
     string? OrgId = null,
     string? CcSessionId = null,
     string? CcAgentId = null,
-    string? CcParentAgentId = null);
+    string? CcParentAgentId = null,
+    string Source = "proxy");
 
 /// <summary>
 /// Writer for the wire_calls table in .scope/telemetry.db. Opens a connection
@@ -70,14 +71,14 @@ public class WireCallDb(string telemetryDbPath)
                     input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
                     tool_use_ids, system_hash, first_user_hash, message_count,
                     request_bytes, response_bytes, machine_id, workspace_id, org_id,
-                    cc_session_id, cc_agent_id, cc_parent_agent_id)
+                    cc_session_id, cc_agent_id, cc_parent_agent_id, source)
                 VALUES (
                     $id, $startedAt, $ttftMs, $totalMs, $endpoint, $status, $stream,
                     $model, $messageId, $stopReason,
                     $inputTokens, $outputTokens, $cacheCreationTokens, $cacheReadTokens,
                     $toolUseIds, $systemHash, $firstUserHash, $messageCount,
                     $requestBytes, $responseBytes, $machineId, $workspaceId, $orgId,
-                    $ccSessionId, $ccAgentId, $ccParentAgentId);
+                    $ccSessionId, $ccAgentId, $ccParentAgentId, $source);
                 """;
             cmd.Parameters.AddWithValue("$id", record.Id);
             cmd.Parameters.AddWithValue("$startedAt", record.StartedAt);
@@ -105,6 +106,7 @@ public class WireCallDb(string telemetryDbPath)
             cmd.Parameters.AddWithValue("$ccSessionId", (object?)record.CcSessionId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ccAgentId", (object?)record.CcAgentId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ccParentAgentId", (object?)record.CcParentAgentId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$source", record.Source);
             cmd.ExecuteNonQuery();
             return true;
         }
