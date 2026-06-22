@@ -65,7 +65,11 @@ public static class TraceProjection
                 // cc_session_id (T-2026-06-19-04): the host conversation id, present from
                 // GetSessionsWithEventCounts when the obs schema is v11+ (EnsureSchema-guarded);
                 // absent (null) from GetSessionTree rows, legacy callers, or a pre-v11 fallback read.
-                CcSessionId: Str(r, "cc_session_id")));
+                CcSessionId: Str(r, "cc_session_id"),
+                // conversation_id + machine_id (schema v16): resume-stable cross-machine conversation
+                // identity. Present when obs schema is v16+ (EnsureSchema-guarded); null otherwise.
+                ConversationId: Str(r, "conversation_id"),
+                MachineId: Str(r, "machine_id")));
         }
         return result;
     }

@@ -92,9 +92,27 @@ public static class ClaudeCodeHookAdapter
     /// <see cref="Subtype"/> is a candidate <see cref="UserSubmitSubtype"/> member; for the
     /// UserPromptSubmit shape it is a provisional default that the write path may refine to
     /// <see cref="UserSubmitSubtype.InitiatingPrompt"/> vs <see cref="UserSubmitSubtype.FollowUp"/>
-    /// based on whether the session already has a prior submit. Host-shape knowledge stays here.
+    /// based on whether the session already has a prior submit. <see cref="TranscriptPath"/> is the
+    /// raw host transcript_path field (optional; used to derive the resume-stable conversation_id).
+    /// Host-shape knowledge stays here.
     /// </summary>
-    public sealed record UserSubmitHookEvent(string? SessionId, string? Prompt, string Subtype);
+    public sealed record UserSubmitHookEvent(string? SessionId, string? Prompt, string Subtype, string? TranscriptPath = null);
+
+    /// <summary>
+    /// Derives the resume-stable conversation id from a Claude Code transcript file path.
+    /// Returns <see cref="Path.GetFileNameWithoutExtension"/> of <paramref name="transcriptPath"/>
+    /// when non-empty, else null. The transcript filename stem is the artifact continuous across
+    /// a <c>/resume</c>: the host session_id changes on resume, the transcript file does not.
+    /// Falls back to null when no transcript_path is available (Codex / non-CC hosts); callers
+    /// substitute the host session_id or base session key in that case.
+    /// Host-shape knowledge (the stem rule) is confined here per the platform-independence rule.
+    /// </summary>
+    public static string? ConversationIdFromTranscript(string? transcriptPath)
+    {
+        if (string.IsNullOrWhiteSpace(transcriptPath)) return null;
+        var stem = Path.GetFileNameWithoutExtension(transcriptPath);
+        return string.IsNullOrEmpty(stem) ? null : stem;
+    }
 
     /// <summary>
     /// Parses a Claude Code <c>UserPromptSubmit</c> hook payload into a <see cref="UserSubmitHookEvent"/>.
@@ -123,8 +141,9 @@ public static class ClaudeCodeHookAdapter
 
             var sessionId = GetString(root, "session_id");
             var prompt = GetString(root, "prompt");
+            var transcriptPath = GetString(root, "transcript_path");
             // Provisional subtype; the write path refines initiating vs follow_up from session state.
-            return new UserSubmitHookEvent(sessionId, prompt, UserSubmitSubtype.FollowUp);
+            return new UserSubmitHookEvent(sessionId, prompt, UserSubmitSubtype.FollowUp, transcriptPath);
         }
         catch { return null; }
     }

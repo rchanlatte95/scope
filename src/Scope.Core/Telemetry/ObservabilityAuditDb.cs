@@ -189,10 +189,11 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
         // The generation columns drive the base-launch rollup (Wave 2 / ST-06) and cc_session_id (v11)
         // drives the universal by_conversation grouping + the TraceSession.cc_session_id surface
-        // (T-2026-06-19-04). All are selected here so the per-session ledger batch and the sessions-list
-        // projection read them WITHOUT a second query. A pre-v11/v12 db (EnsureSchema could not apply, e.g.
-        // a read-only connection) falls back to omitting all three together (column-omitting catch).
-        var newCols = ", s.base_session_key, s.generation, s.cc_session_id";
+        // (T-2026-06-19-04). conversation_id + machine_id (v16) drive resume-stable cross-machine
+        // conversation grouping. All are selected here so the per-session ledger batch and the
+        // sessions-list projection read them WITHOUT a second query. A pre-v11/v12/v16 db (EnsureSchema
+        // could not apply, e.g. a read-only connection) falls back to omitting all together (column-omitting catch).
+        var newCols = ", s.base_session_key, s.generation, s.cc_session_id, s.conversation_id, s.machine_id";
         var (where, parms) = BuildSessionWindowFilter(since, from, to, includeDeleted);
 
         List<Dictionary<string, object?>> Run(string extraCols)
@@ -218,7 +219,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
 
         try { return Run(newCols); }
-        catch (SqliteException) { return Run(""); /* pre-v11/v12 schema: no base_session_key/generation/cc_session_id columns */ }
+        catch (SqliteException) { return Run(""); /* pre-v11/v12/v16 schema: no base_session_key/generation/cc_session_id/conversation_id/machine_id columns */ }
     }
 
     /// <summary>
@@ -1695,6 +1696,12 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         var ccSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
         var bridged = ResolveCcSessionId(scopeSessionKey);
         if (!string.IsNullOrEmpty(bridged)) ccSessionIds.Add(bridged);
+        // conversation_id (schema v16): transcript-source wire rows key on the transcript stem
+        // (= conversation_id), which equals cc_session_id on the first-ever session but diverges
+        // on resume (the transcript file is continuous; the host session_id is not). Adding it as
+        // a third candidate ensures transcript-cost rows still attribute on resume.
+        var convId = ResolveConversationId(scopeSessionKey);
+        if (!string.IsNullOrEmpty(convId)) ccSessionIds.Add(convId);
 
         // Map each span's agent_ref (host sub-agent id) to its span id for per-subagent binding.
         // agent_ref is a schema-v5 column; read it via a dedicated tolerant query (NOT in the main
@@ -1778,6 +1785,25 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             return result is string s && s.Length > 0 ? s : null;
         }
         catch (SqliteException) { return null; /* pre-v11 schema: no cc_session_id column */ }
+    }
+
+    /// <summary>
+    /// Reads the resume-stable <c>conversation_id</c> for a given Scope session key from
+    /// <c>obs_agent_sessions.conversation_id</c> (schema v16). Returns null when the column is
+    /// absent (pre-v16 db) or no binding exists. Tolerant: a SqliteException on missing column
+    /// degrades to null; observability must not crash callers.
+    /// </summary>
+    private string? ResolveConversationId(string scopeSessionKey)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT conversation_id FROM obs_agent_sessions WHERE session_key = $key LIMIT 1;";
+        cmd.Parameters.AddWithValue("$key", scopeSessionKey);
+        try
+        {
+            var result = cmd.ExecuteScalarRetrying();
+            return result is string s && s.Length > 0 ? s : null;
+        }
+        catch (SqliteException) { return null; /* pre-v16 schema: no conversation_id column */ }
     }
 
     /// <summary>

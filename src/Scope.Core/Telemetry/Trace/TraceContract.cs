@@ -181,7 +181,15 @@ public sealed record TraceSession(
     // omitting it on a pre-v11 db). It is the conversation identity the universal by_conversation grouping
     // partitions on; surfacing it lets the picker label/group per-generation sessions by conversation.
     // null when the host supplied no session id (cron without a captured cc, MCP, host-provided rows).
-    [property: JsonPropertyName("cc_session_id")] string? CcSessionId = null);
+    [property: JsonPropertyName("cc_session_id")] string? CcSessionId = null,
+    // Resume-stable conversation id (schema v16). Source = obs_agent_sessions.conversation_id (the
+    // transcript filename stem, continuous across /resume). null when absent (pre-v16 db, non-CC hosts,
+    // cron rows). Additive at the end so positional construction elsewhere is unaffected.
+    [property: JsonPropertyName("conversation_id")] string? ConversationId = null,
+    // Locally-minted stable machine id (schema v16). Source = obs_agent_sessions.machine_id. Enables
+    // correct cross-machine merge by distinguishing rows captured on different machines. null on legacy
+    // rows and non-capturing hosts. Additive at the end so positional construction elsewhere is unaffected.
+    [property: JsonPropertyName("machine_id")] string? MachineId = null);
 
 /// <summary>Body for kind=sessions_list.</summary>
 public sealed record SessionsListBody(

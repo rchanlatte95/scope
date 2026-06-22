@@ -289,14 +289,14 @@ public class ObservabilityDb(SqliteConnection connection)
     /// rows: a NULL generation is read as 0 and a NULL base as the session_key itself (forward-only).
     /// </para>
     /// </summary>
-    public void UpsertAgentSession(string sessionKey, string agentType, string agentSubtype, string? parentSessionKey = null, string? origin = null, string? ccSessionId = null, string? baseSessionKey = null, int? generation = null)
+    public void UpsertAgentSession(string sessionKey, string agentType, string agentSubtype, string? parentSessionKey = null, string? origin = null, string? ccSessionId = null, string? baseSessionKey = null, int? generation = null, string? conversationId = null, string? machineId = null)
     {
         var now = DateTime.UtcNow.ToString("o");
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO obs_agent_sessions
-                (session_key, agent_type, agent_subtype, first_seen_at, last_seen_at, request_count, parent_session_key, origin, cc_session_id, base_session_key, generation)
-            VALUES ($key, $type, $subtype, $now, $now, 1, $parentKey, $origin, $ccSessionId, $baseKey, $generation)
+                (session_key, agent_type, agent_subtype, first_seen_at, last_seen_at, request_count, parent_session_key, origin, cc_session_id, base_session_key, generation, conversation_id, machine_id)
+            VALUES ($key, $type, $subtype, $now, $now, 1, $parentKey, $origin, $ccSessionId, $baseKey, $generation, $conversationId, $machineId)
             ON CONFLICT(session_key) DO UPDATE SET
                 agent_subtype = $subtype,
                 last_seen_at = $now,
@@ -305,7 +305,9 @@ public class ObservabilityDb(SqliteConnection connection)
                 origin = COALESCE(obs_agent_sessions.origin, $origin),
                 cc_session_id = COALESCE(obs_agent_sessions.cc_session_id, $ccSessionId),
                 base_session_key = COALESCE(obs_agent_sessions.base_session_key, $baseKey),
-                generation = COALESCE(obs_agent_sessions.generation, $generation);
+                generation = COALESCE(obs_agent_sessions.generation, $generation),
+                conversation_id = COALESCE(obs_agent_sessions.conversation_id, $conversationId),
+                machine_id = COALESCE(obs_agent_sessions.machine_id, $machineId);
             """;
         cmd.Parameters.AddWithValue("$key", sessionKey);
         cmd.Parameters.AddWithValue("$type", agentType);
@@ -316,6 +318,8 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$ccSessionId", (object?)ccSessionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$baseKey", (object?)baseSessionKey ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$generation", (object?)generation ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$conversationId", (object?)conversationId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$machineId", (object?)machineId ?? DBNull.Value);
         cmd.ExecuteNonQueryRetrying();
     }
 
