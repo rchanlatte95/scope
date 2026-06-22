@@ -1793,6 +1793,10 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     /// absent (pre-v16 db) or no binding exists. Tolerant: a SqliteException on missing column
     /// degrades to null; observability must not crash callers.
     /// </summary>
+    /// <remarks>
+    /// Does NOT call EnsureSchema itself; safe only because <see cref="ResolveCcSessionId"/> (which
+    /// does call EnsureSchema) is always invoked immediately before this in AnnotateWireTokensByHeader.
+    /// </remarks>
     private string? ResolveConversationId(string scopeSessionKey)
     {
         using var cmd = connection.CreateCommand();
