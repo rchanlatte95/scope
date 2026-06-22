@@ -76,12 +76,36 @@
   min-width: 0;
 }
 
+/* ---- TRACE-04: timeline header row (label + RefreshControl side-by-side) ---- */
+/* flex-wrap: wrap ensures the RefreshControl drops below the label at narrow widths
+   (390px mobile / 320px reflow). min-width: 0 on all children prevents overflow. */
+.timelineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .timelineLabel {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--scope-color-text-muted);
   font-weight: 600;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* RefreshControl inside the timeline header: allow it to shrink and wrap.
+   The component itself is an inline-flex with flex-wrap:wrap, so its children
+   wrap before they overflow. max-width: 100% caps it so it never bleeds out. */
+.timelineRefreshControl {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .timelinePagination {
@@ -683,6 +707,29 @@
 /* When open, add spacing between summary and content */
 .entriesDisclosure[open] > .entriesSummary {
   margin-bottom: var(--scope-space-2);
+}
+
+/* ---- TRACE-05: initiating-prompt row — FULL ENCLOSING BORDER (all four sides) ----
+   Applied via .timelineInitiatingRow class on the <tr> (set in getRowClassName when
+   isInitiatingSubmit is true). In a <table> a full border around a <tr> requires:
+     - top+bottom on ALL cells (tds)
+     - left border on the :first-child cell
+     - right border on the :last-child cell
+   This is NOT a left accent stripe (which is forbidden for status). It is a FULL
+   enclosing border providing emphasis to the initiating prompt row.
+   Uses --scope-color-border (semantic token) visible in both themes. */
+
+.timelineInitiatingRow td {
+  border-top: 1px solid var(--scope-color-border);
+  border-bottom: 1px solid var(--scope-color-border);
+}
+
+.timelineInitiatingRow td:first-child {
+  border-left: 1px solid var(--scope-color-border);
+}
+
+.timelineInitiatingRow td:last-child {
+  border-right: 1px solid var(--scope-color-border);
 }
 
 /* Visually hidden — announces to screen readers but takes no visible space.
