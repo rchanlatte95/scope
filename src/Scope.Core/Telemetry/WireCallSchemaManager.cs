@@ -1,6 +1,7 @@
 namespace Scope.Core.Telemetry;
 
 using Microsoft.Data.Sqlite;
+using Scope.Core.Utilities;
 using System.Globalization;
 
 /// <summary>
@@ -50,14 +51,14 @@ public class WireCallSchemaManager(SqliteConnection connection)
                 description TEXT NOT NULL
             );
             """;
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     private int CurrentVersion()
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COALESCE(MAX(version), 0) FROM wire_schema_versions;";
-        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+        return Convert.ToInt32(cmd.ExecuteScalarRetrying(), CultureInfo.InvariantCulture);
     }
 
     private void CreateBaseSchema()
@@ -101,7 +102,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
             CREATE INDEX IF NOT EXISTS idx_wire_model    ON wire_calls(model);
             CREATE INDEX IF NOT EXISTS idx_wire_message  ON wire_calls(message_id);
             """;
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     private void MigrateToV2()
@@ -126,7 +127,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
             CREATE INDEX IF NOT EXISTS idx_wire_ccsession ON wire_calls(cc_session_id);
             CREATE INDEX IF NOT EXISTS idx_wire_ccagent   ON wire_calls(cc_agent_id);
             """;
-        idxCmd.ExecuteNonQuery();
+        idxCmd.ExecuteNonQueryRetrying();
 
         InsertSchemaVersion(2, "CC attribution: cc_session_id, cc_agent_id, cc_parent_agent_id on wire_calls");
     }
@@ -162,7 +163,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
             "source" => "ALTER TABLE wire_calls ADD COLUMN source TEXT NOT NULL DEFAULT 'proxy';",
             _ => throw new ArgumentOutOfRangeException(nameof(column), column, "Unknown wire_calls column."),
         };
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     private bool ColumnExists(string column)
@@ -170,7 +171,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('wire_calls') WHERE name = $col;";
         cmd.Parameters.AddWithValue("$col", column);
-        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
+        return Convert.ToInt32(cmd.ExecuteScalarRetrying(), CultureInfo.InvariantCulture) > 0;
     }
 
     private void InsertSchemaVersion(int version, string description)
@@ -183,6 +184,6 @@ public class WireCallSchemaManager(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$version", version);
         cmd.Parameters.AddWithValue("$appliedAt", DateTime.UtcNow.ToString("o"));
         cmd.Parameters.AddWithValue("$description", description);
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 }
