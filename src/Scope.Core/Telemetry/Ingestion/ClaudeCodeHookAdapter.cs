@@ -312,7 +312,11 @@ public static class ClaudeCodeHookAdapter
             OutputTokens: agentResult.OutputTokens,
             Capabilities: BuildCapabilities(root, hasResponse),
             RequestedModel: requestedModel,
-            Status: status);
+            Status: status,
+            // transcript_path (T-2026-06-22-01 Piece 4): the path to this session's transcript JSONL,
+            // consumed by the CLI hook to fold in ambient transcript cost ingestion. Optional; a host
+            // version that drops it degrades to null. Host-shape knowledge stays in this adapter.
+            TranscriptPath: GetString(root, "transcript_path"));
     }
 
     /// <summary>The two machine-readable tool-call statuses Scope derives from a PostToolUse payload.</summary>
