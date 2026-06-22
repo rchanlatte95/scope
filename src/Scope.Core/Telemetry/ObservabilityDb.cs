@@ -54,7 +54,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$elapsed", totalElapsedMs.HasValue ? totalElapsedMs.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", createdAt.ToString("o"));
         cmd.Parameters.AddWithValue("$completedAt", completedAt.HasValue ? completedAt.Value.ToString("o") : DBNull.Value);
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$sessionKey", (object?)sessionKey ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$label", (object?)label ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", createdAt.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -83,7 +83,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.CommandText = "UPDATE obs_dispatches SET completed_at = $completedAt WHERE id = $id;";
         cmd.Parameters.AddWithValue("$id", id);
         cmd.Parameters.AddWithValue("$completedAt", completedAt.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -121,7 +121,10 @@ public class ObservabilityDb(SqliteConnection connection)
                 pElapsed.Value = stage.ElapsedMs;
                 pMetadata.Value = (object?)stage.MetadataJson ?? DBNull.Value;
                 pCreatedAt.Value = stage.CreatedAt.ToString("o");
-                cmd.ExecuteNonQuery();
+                // Single-statement retry: each row INSERT is atomic and carries a unique guid id, so a
+                // transient-lock retry of THIS one statement never double-applies. We do NOT retry the
+                // surrounding transaction/loop as a unit (that could re-insert already-committed rows).
+                cmd.ExecuteNonQueryRetrying();
             }
 
             if (existingTransaction is null)
@@ -176,7 +179,9 @@ public class ObservabilityDb(SqliteConnection connection)
                 pSource.Value = r.Source.ToString();
                 pIsExact.Value = RetrievalResultAnalysis.IsExactMatch(r, queryText) ? 1 : 0;
                 pBoosts.Value = RetrievalResultAnalysis.ExtractBoosts(r);
-                cmd.ExecuteNonQuery();
+                // Single-statement retry: each row INSERT is atomic with a unique guid id; retrying THIS
+                // statement is safe and never re-applies the loop/transaction as a whole.
+                cmd.ExecuteNonQueryRetrying();
             }
 
             if (existingTransaction is null)
@@ -227,7 +232,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$targetTokens", m.TargetTokenCount);
         cmd.Parameters.AddWithValue("$contextTokens", m.ContextTokenCount);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -263,7 +268,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$outputCost", outputCostUsd);
         cmd.Parameters.AddWithValue("$totalCost", totalCostUsd);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -311,7 +316,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$ccSessionId", (object?)ccSessionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$baseKey", (object?)baseSessionKey ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$generation", (object?)generation ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -335,7 +340,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$eventType", eventType);
         cmd.Parameters.AddWithValue("$eventData", (object?)eventDataJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -361,7 +366,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$payload", payloadText);
         cmd.Parameters.AddWithValue("$tokens", tokenCount.HasValue ? tokenCount.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -422,7 +427,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$pinnedPricesAsOf", (object?)pinnedPricesAsOf ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pinnedBreakdownJson", (object?)pinnedBreakdownJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$model", (object?)model ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -444,7 +449,7 @@ public class ObservabilityDb(SqliteConnection connection)
             """;
         cmd.Parameters.AddWithValue("$sessionKey", sessionKey);
         cmd.Parameters.AddWithValue("$agentRef", agentRef);
-        return cmd.ExecuteScalar() as string;
+        return cmd.ExecuteScalarRetrying() as string;
     }
 
     /// <summary>
@@ -475,7 +480,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$spanId", (object?)spanId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <summary>
@@ -490,7 +495,7 @@ public class ObservabilityDb(SqliteConnection connection)
             ORDER BY started_at DESC LIMIT 1;
             """;
         cmd.Parameters.AddWithValue("$sessionKey", sessionKey);
-        return cmd.ExecuteScalar() as string;
+        return cmd.ExecuteScalarRetrying() as string;
     }
 
     /// <summary>
@@ -537,7 +542,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$turnIndex", submit.TurnIndex.HasValue ? submit.TurnIndex.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("$spanId", (object?)spanId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
-        return cmd.ExecuteNonQuery() > 0;
+        return cmd.ExecuteNonQueryRetrying() > 0;
     }
 
     /// <summary>
@@ -554,7 +559,7 @@ public class ObservabilityDb(SqliteConnection connection)
             WHERE session_key = $session AND event_type = 'user_submit';
             """;
         cmd.Parameters.AddWithValue("$session", sessionKey);
-        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+        return Convert.ToInt32(cmd.ExecuteScalarRetrying(), CultureInfo.InvariantCulture);
     }
 
 }

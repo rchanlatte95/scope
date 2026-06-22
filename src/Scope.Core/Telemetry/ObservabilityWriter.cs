@@ -499,7 +499,7 @@ public sealed class ObservabilityWriter : IDisposable
             """;
         cmd.Parameters.AddWithValue("$base", baseKey);
         cmd.Parameters.AddWithValue("$cc", ccSessionId);
-        var result = cmd.ExecuteScalar();
+        var result = cmd.ExecuteScalarRetrying();
         return result is string s && s.Length > 0 ? s : null;
     }
 
@@ -513,7 +513,7 @@ public sealed class ObservabilityWriter : IDisposable
         cmd.Transaction = txn;
         cmd.CommandText = "SELECT COALESCE(MAX(generation), -1) FROM obs_session_generations WHERE base_session_key = $base;";
         cmd.Parameters.AddWithValue("$base", baseKey);
-        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        return Convert.ToInt32(cmd.ExecuteScalarRetrying(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void InsertGenerationBinding(
@@ -532,7 +532,11 @@ public sealed class ObservabilityWriter : IDisposable
         cmd.Parameters.AddWithValue("$key", effectiveKey);
         cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
         cmd.Parameters.AddWithValue("$source", (object?)(openSource.IsInhabited ? openSource : null) ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
+        // Retry only THIS single INSERT on a transient lock. A PK-conflict race (a concurrent
+        // inserter wins (base, cc)) is a NON-busy SqliteException that SqliteRetry rethrows
+        // immediately, so the BindGeneration `catch (SqliteException) when (attempt == 0)` re-SELECT
+        // path is preserved unchanged.
+        cmd.ExecuteNonQueryRetrying();
     }
 
     private void PromoteOpenSource(string baseKey, string ccSessionId, string? openSource, SqliteTransaction txn)
@@ -546,7 +550,7 @@ public sealed class ObservabilityWriter : IDisposable
         cmd.Parameters.AddWithValue("$source", (object?)openSource ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$base", baseKey);
         cmd.Parameters.AddWithValue("$cc", ccSessionId);
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 
     /// <inheritdoc />

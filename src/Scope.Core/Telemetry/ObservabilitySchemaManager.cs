@@ -1,6 +1,7 @@
 namespace Scope.Core.Telemetry;
 
 using Microsoft.Data.Sqlite;
+using Scope.Core.Utilities;
 
 /// <summary>
 /// Creates the obs_* observability tables in .scope/telemetry.db.
@@ -141,7 +142,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             CREATE INDEX IF NOT EXISTS idx_obspay_request    ON obs_payloads(request_id);
             CREATE INDEX IF NOT EXISTS idx_obspay_direction  ON obs_payloads(direction);
             """;
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
 
         InsertSchemaVersion(1, "Initial observability schema with obs_* tables");
 
@@ -162,14 +163,14 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             );
             CREATE INDEX IF NOT EXISTS idx_obsdisp_session ON obs_dispatches(session_key);
             """;
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
 
         // ALTER TABLE lacks IF NOT EXISTS before SQLite 3.35, wrap in try/catch
         try
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_requests ADD COLUMN dispatch_id TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -177,7 +178,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obsreq_dispatch ON obs_requests(dispatch_id);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -205,14 +206,14 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             CREATE INDEX IF NOT EXISTS idx_obsspan_dispatch ON obs_agent_spans(dispatch_id);
             CREATE INDEX IF NOT EXISTS idx_obsspan_parent ON obs_agent_spans(parent_span_id);
             """;
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
 
         // ALTER TABLE lacks IF NOT EXISTS before SQLite 3.35, wrap in try/catch
         try
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_agent_events ADD COLUMN span_id TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -220,7 +221,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obsagent_span ON obs_agent_events(span_id);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -235,7 +236,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN parent_session_key TEXT;";
-            cmd.ExecuteNonQuery();
+            cmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -243,7 +244,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssess_parent ON obs_agent_sessions(parent_session_key);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -271,7 +272,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             {
                 using var alterCmd = connection.CreateCommand();
                 alterCmd.CommandText = ddl;
-                alterCmd.ExecuteNonQuery();
+                alterCmd.ExecuteNonQueryRetrying();
             }
             catch (SqliteException) { /* column already exists */ }
         }
@@ -280,7 +281,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obsspan_agentref ON obs_agent_spans(session_key, agent_ref);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -312,7 +313,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             {
                 using var alterCmd = connection.CreateCommand();
                 alterCmd.CommandText = ddl;
-                alterCmd.ExecuteNonQuery();
+                alterCmd.ExecuteNonQueryRetrying();
             }
             catch (SqliteException) { /* column already exists */ }
         }
@@ -331,7 +332,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN origin TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -350,7 +351,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN deleted_at TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -373,7 +374,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_agent_spans ADD COLUMN model TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -409,7 +410,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             {
                 using var alterCmd = connection.CreateCommand();
                 alterCmd.CommandText = ddl;
-                alterCmd.ExecuteNonQuery();
+                alterCmd.ExecuteNonQueryRetrying();
             }
             catch (SqliteException) { /* column already exists */ }
         }
@@ -422,7 +423,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 ON obs_agent_events(session_key, content_hash)
                 WHERE event_type = 'user_submit' AND content_hash IS NOT NULL;
                 """;
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -430,7 +431,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obsagent_subtype ON obs_agent_events(event_subtype);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -454,7 +455,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN cc_session_id TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -462,7 +463,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssess_ccsession ON obs_agent_sessions(cc_session_id);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -495,7 +496,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             CREATE UNIQUE INDEX IF NOT EXISTS idx_obssessgen_effective
                 ON obs_session_generations(base_session_key, generation);
             """;
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
 
         // Stamp the resolved generation provenance onto the session row so a reader can attribute a
         // session to its base/generation without re-deriving. Nullable, forward-only: a NULL generation
@@ -512,7 +513,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             {
                 using var alterCmd = connection.CreateCommand();
                 alterCmd.CommandText = ddl;
-                alterCmd.ExecuteNonQuery();
+                alterCmd.ExecuteNonQueryRetrying();
             }
             catch (SqliteException) { /* column already exists */ }
         }
@@ -521,7 +522,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idxCmd = connection.CreateCommand();
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssess_base ON obs_agent_sessions(base_session_key);";
-            idxCmd.ExecuteNonQuery();
+            idxCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -550,7 +551,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var dropIdx = connection.CreateCommand();
             dropIdx.CommandText = "DROP INDEX IF EXISTS idx_obssessgen_effective;";
-            dropIdx.ExecuteNonQuery();
+            dropIdx.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -558,7 +559,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var idx = connection.CreateCommand();
             idx.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssessgen_effective ON obs_session_generations(base_session_key, generation);";
-            idx.ExecuteNonQuery();
+            idx.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { }
 
@@ -590,7 +591,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE obs_agent_events ADD COLUMN status TEXT;";
-            alterCmd.ExecuteNonQuery();
+            alterCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* column already exists */ }
 
@@ -613,7 +614,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         {
             using var dropCmd = connection.CreateCommand();
             dropCmd.CommandText = "DROP TABLE IF EXISTS obs_session_generation_hints;";
-            dropCmd.ExecuteNonQuery();
+            dropCmd.ExecuteNonQueryRetrying();
         }
         catch (SqliteException) { /* table already absent */ }
 
@@ -630,6 +631,6 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$version", version);
         cmd.Parameters.AddWithValue("$appliedAt", DateTime.UtcNow.ToString("o"));
         cmd.Parameters.AddWithValue("$description", description);
-        cmd.ExecuteNonQuery();
+        cmd.ExecuteNonQueryRetrying();
     }
 }

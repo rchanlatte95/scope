@@ -107,7 +107,7 @@ public class WireCallDb(string telemetryDbPath)
             cmd.Parameters.AddWithValue("$ccAgentId", (object?)record.CcAgentId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$ccParentAgentId", (object?)record.CcParentAgentId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$source", record.Source);
-            cmd.ExecuteNonQuery();
+            cmd.ExecuteNonQueryRetrying();
             return true;
         }
         catch (SqliteException ex)

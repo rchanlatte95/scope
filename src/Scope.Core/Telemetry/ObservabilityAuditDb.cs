@@ -273,7 +273,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             FROM obs_agent_sessions s
             {where};
             """;
-        return (long)(cmd.ExecuteScalar() ?? 0L);
+        return (long)(cmd.ExecuteScalarRetrying() ?? 0L);
     }
 
     /// <summary>
@@ -301,7 +301,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             """;
         cmd.Parameters.AddWithValue("$key", sessionKey);
         if (since != null) cmd.Parameters.AddWithValue("$since", since);
-        try { return (long)(cmd.ExecuteScalar() ?? 0L); }
+        try { return (long)(cmd.ExecuteScalarRetrying() ?? 0L); }
         catch (SqliteException) { return 0L; }
     }
 
@@ -323,7 +323,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             """;
         cmd.Parameters.AddWithValue("$deletedAt", deletedAt);
         cmd.Parameters.AddWithValue("$sessionKey", sessionKey);
-        return cmd.ExecuteNonQuery() > 0 ? deletedAt : null;
+        return cmd.ExecuteNonQueryRetrying() > 0 ? deletedAt : null;
     }
 
     /// <summary>
@@ -341,7 +341,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             WHERE session_key = $sessionKey;
             """;
         cmd.Parameters.AddWithValue("$sessionKey", sessionKey);
-        return cmd.ExecuteNonQuery() > 0;
+        return cmd.ExecuteNonQueryRetrying() > 0;
     }
 
     /// <summary>
@@ -371,7 +371,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 FROM obs_agent_sessions
                 WHERE session_key IN ({string.Join(", ", placeholders)});
                 """;
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             while (reader.Read())
             {
                 var key = reader.GetString(0);
@@ -513,7 +513,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
                 try
                 {
-                    var result = cmd.ExecuteScalar();
+                    var result = cmd.ExecuteScalarRetrying();
                     if (result is double d) totalCost += d;
                 }
                 catch (SqliteException) { }
@@ -639,7 +639,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 FROM obs_requests
                 {whereClause};
                 """;
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             if (reader.Read())
             {
                 result["total_requests"] = reader.IsDBNull(0) ? 0L : reader.GetInt64(0);
@@ -667,7 +667,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 ORDER BY cnt DESC;
                 """;
             var surfaceCounts = new Dictionary<string, long>(StringComparer.Ordinal);
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             while (reader.Read())
                 surfaceCounts[reader.GetString(0)] = reader.GetInt64(1);
             result["by_surface"] = surfaceCounts;
@@ -691,7 +691,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 ORDER BY cnt DESC;
                 """;
             var opCounts = new Dictionary<string, long>(StringComparer.Ordinal);
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             while (reader.Read())
                 opCounts[reader.GetString(0)] = reader.GetInt64(1);
             result["by_operation"] = opCounts;
@@ -712,7 +712,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 FROM obs_cost_estimates c
                 {whereClause};
                 """;
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             if (reader.Read())
                 result["total_cost_usd"] = reader.IsDBNull(0) ? 0.0 : Math.Round(reader.GetDouble(0), 6);
         }
@@ -727,7 +727,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='obs_requests';";
-        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
+        return Convert.ToInt32(cmd.ExecuteScalarRetrying(), CultureInfo.InvariantCulture) > 0;
     }
 
     /// <summary>
@@ -965,7 +965,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         var matches = new List<string>();
         try
         {
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             while (reader.Read())
                 matches.Add(reader.GetString(0));
         }
@@ -1774,7 +1774,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$key", scopeSessionKey);
         try
         {
-            var result = cmd.ExecuteScalar();
+            var result = cmd.ExecuteScalarRetrying();
             return result is string s && s.Length > 0 ? s : null;
         }
         catch (SqliteException) { return null; /* pre-v11 schema: no cc_session_id column */ }
@@ -1800,7 +1800,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$key", sessionKey);
         try
         {
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             while (reader.Read())
             {
                 if (reader.IsDBNull(1)) continue;
@@ -1891,7 +1891,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
             try
             {
-                using var reader = cmd.ExecuteReader();
+                using var reader = cmd.ExecuteReaderRetrying();
                 while (reader.Read())
                 {
                     var input = reader.IsDBNull(2) ? (long?)null : reader.GetInt64(2);
@@ -1935,7 +1935,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
             try
             {
-                using var reader = cmd.ExecuteReader();
+                using var reader = cmd.ExecuteReaderRetrying();
                 while (reader.Read())
                 {
                     var reqId = reader.GetString(0);
@@ -1962,7 +1962,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='wire_calls';";
         bool exists;
-        try { exists = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0; }
+        try { exists = Convert.ToInt32(cmd.ExecuteScalarRetrying(), CultureInfo.InvariantCulture) > 0; }
         catch (SqliteException) { return false; }
 
         // Lazy-migration reader gap (T-2026-06-19-01): wire_calls is migrated by the WRITE path
@@ -2047,7 +2047,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
         try
         {
-            using var reader = cmd.ExecuteReader();
+            using var reader = cmd.ExecuteReaderRetrying();
             while (reader.Read())
             {
                 if (reader.IsDBNull(0)) continue;
@@ -2292,7 +2292,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
             try
             {
-                using var reader = cmd.ExecuteReader();
+                using var reader = cmd.ExecuteReaderRetrying();
                 while (reader.Read())
                 {
                     var key = reader.GetString(0);
@@ -2339,7 +2339,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
             try
             {
-                using var reader = cmd.ExecuteReader();
+                using var reader = cmd.ExecuteReaderRetrying();
                 while (reader.Read())
                 {
                     var key = reader.GetString(0);
@@ -2369,7 +2369,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     private static List<Dictionary<string, object?>> ReadRows(SqliteCommand cmd)
     {
         var rows = new List<Dictionary<string, object?>>();
-        using var reader = cmd.ExecuteReader();
+        using var reader = cmd.ExecuteReaderRetrying();
         while (reader.Read())
         {
             var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.Ordinal);
