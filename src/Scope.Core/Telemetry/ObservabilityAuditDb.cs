@@ -2002,7 +2002,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                    input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
                    tool_use_ids, system_hash, first_user_hash, message_count,
                    request_bytes, response_bytes,
-                   cc_session_id, cc_agent_id, cc_parent_agent_id
+                   cc_session_id, cc_agent_id, cc_parent_agent_id, source
             FROM wire_calls
             {where}
             ORDER BY started_at DESC

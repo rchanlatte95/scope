@@ -44,7 +44,11 @@ public static class TraceWireProjection
                 FirstUserHash: Str(r, "first_user_hash"),
                 MessageCount: Int(r, "message_count"),
                 RequestBytes: Long(r, "request_bytes"),
-                ResponseBytes: Long(r, "response_bytes")));
+                ResponseBytes: Long(r, "response_bytes"),
+                // Row provenance from wire_calls.source (schema v3). A legacy/pre-v3 row that lacked the
+                // column reads null here; coalesce to "proxy" to match the schema DEFAULT (honest: an
+                // unlabelled wire row is a proxy row, never fabricated).
+                Source: Str(r, "source") ?? "proxy"));
         }
 
         // available reflects whether the wire-metering subsystem has produced data: the table must
