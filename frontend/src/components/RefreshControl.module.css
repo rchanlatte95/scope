@@ -1,0 +1,116 @@
+/* RefreshControl.module.css — Portable auto-refresh control (TRACE-04).
+   Semantic tokens only. No raw hex. Sharp geometry (--scope-radius-sm on small controls).
+   4/8px spacing grid. 44px min touch targets. Visible focus via global :focus-visible. */
+
+/* Root: inline-flex toolbar row. Wraps at narrow widths for reflow safety.
+   max-width: 100% prevents the control from bleeding past its container at
+   390px / 320px widths (WCAG reflow compliance). */
+.refreshControl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-2);
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* Status text: polite aria-live region; compact muted label.
+   No white-space: nowrap — allow text to wrap at narrow widths. */
+.statusText {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+}
+
+/* Toggle button: aria-pressed conveys state. --scope-radius-sm (2px) per sharp-geo rule. */
+.toggleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: 0 var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text-muted);
+  font: inherit;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.toggleBtn:hover {
+  background-color: var(--scope-color-surface-2);
+  border-color: var(--scope-color-text-muted);
+  color: var(--scope-color-text);
+}
+
+/* "On" state: accent border + text to signal auto-refresh is active. */
+.toggleBtnOn {
+  border-color: var(--scope-color-accent);
+  color: var(--scope-color-accent);
+  background-color: var(--scope-color-accent-bg);
+}
+
+.toggleBtnOn:hover {
+  background-color: var(--scope-color-accent-bg);
+  border-color: var(--scope-color-accent);
+  color: var(--scope-color-accent);
+}
+
+/* Interval label: wraps the "Every" text + select as one logical control. */
+.intervalLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+}
+
+.intervalLabelText {
+  font-size: var(--scope-font-size-xs);
+  color: var(--scope-color-text-muted);
+  white-space: nowrap;
+}
+
+/* Interval select: sharp geometry, 44px min target via min-height on the label. */
+.intervalSelect {
+  min-height: var(--scope-target-min);
+  padding: 0 var(--scope-space-2);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font: inherit;
+  font-size: var(--scope-font-size-xs);
+  cursor: pointer;
+}
+
+.intervalSelect:hover:not(:disabled) {
+  border-color: var(--scope-color-text-muted);
+}
+
+.intervalSelect:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Manual refresh button: always enabled; outcome-named "Refresh". */
+.refreshBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--scope-space-1);
+  min-height: var(--scope-target-min);
+  min-width: var(--scope-target-min);
+  padding: 0 var(--scope-space-3);
+  border: 1px solid var(--scope-color-border);
+  border-radius: var(--scope-radius-sm);
+  background-color: var(--scope-color-surface-raised);
+  color: var(--scope-color-text);
+  font: inherit;
+  font-size: var(--scope-font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.refreshBtn:hover {
+  background-color: var(--scope-color-surface-2);
+  border-color: var(--scope-color-text-muted);
+}

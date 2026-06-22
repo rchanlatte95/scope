@@ -1,5 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { RefreshControl } from '../components/RefreshControl';
 import {
   fetchTraceSessions,
   fetchTraceGraph,
@@ -393,6 +395,18 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
   // Static string id — does not change across renders, so a ref is not needed.
   const limitPanelId = 'trace-limit-notices-panel';
 
+  // ---- TRACE-04: auto-refresh state ----
+  // invalidateQueries(['traces']) marks all trace cache entries stale and triggers refetch.
+  // The callback is defined with useCallback before useAutoRefresh so it can be passed in.
+  const handleRefreshNow = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['traces'] });
+  }, [queryClient]);
+
+  const autoRefresh = useAutoRefresh({
+    defaultEnabled: true,
+    onRefreshNow: handleRefreshNow,
+  });
+
   // ---- R2: sessions list via useQuery ----
   // Used only for the initial session-resolution logic (deep-link handling and
   // auto-selecting the first session). The picker manages its own filtered queries.
@@ -406,6 +420,7 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
     queryKey: queryKeys.traceSessions(),
     queryFn: () => fetchTraceSessions(),
     staleTime: STALE_COMMANDS_TRACES_MS,
+    refetchInterval: autoRefresh.refetchInterval,
   });
 
   // When the sessions query first succeeds, resolve the initial selection
@@ -475,6 +490,7 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
     queryFn: () => fetchTraceGraph(activeSelected),
     staleTime: STALE_GRAPH_MS,
     enabled: selected != null,
+    refetchInterval: autoRefresh.refetchInterval,
   });
 
   // ---- R2: trace page via useQuery (page-based pagination, T-2026-06-17-03) ----
@@ -485,6 +501,7 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
     queryFn: () => fetchTraceFull(activeSelected, eventsPageState.pageSize, null, eventsPageState.page, eventsPageState.pageSize),
     staleTime: STALE_COMMANDS_TRACES_MS,
     enabled: selected != null,
+    refetchInterval: autoRefresh.refetchInterval,
   });
 
   // When the selected session changes, reset the events page to 1 and clear stale state.
@@ -1140,9 +1157,12 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
 
             {/* Timeline section: authoritative chronological evidence (non-graph equivalent). */}
             <div className={styles.timelineSection}>
-              <span className={styles.timelineLabel}>
-                Event timeline · {eventsTotalCount > 0 ? `${String(eventsTotalCount)} entries total` : `${String(entries.length)} entries`}
-              </span>
+              <div className={styles.timelineHeader}>
+                <span className={styles.timelineLabel}>
+                  Event timeline · {eventsTotalCount > 0 ? `${String(eventsTotalCount)} entries total` : `${String(entries.length)} entries`}
+                </span>
+                <RefreshControl autoRefresh={autoRefresh} className={styles.timelineRefreshControl ?? ''} />
+              </div>
               {traceError != null && traceError !== '' && <p className={styles.error}>Failed to load trace: {traceError}</p>}
 
               {/* Pagination: shown when server reports total_count (newer server). */}
@@ -1198,6 +1218,7 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
                     idx % 2 === 1 ? styles.timelineEventRowAlt : '',
                     expandedRowIds.has(row.id) ? styles.timelineEventRowExpanded : '',
                     row.id === highlightId ? styles.timelineRowSelected : '',
+                    isUserSubmitEntry(row) && isInitiatingSubmit(row.user_submit_subtype) ? styles.timelineInitiatingRow : '',
                   ].filter(Boolean).join(' ')}
                   getRowStyle={(row) => ({
                     '--event-color': `var(${TOOL_TYPE_TOKEN[getEntryToolType(row)]})`,
