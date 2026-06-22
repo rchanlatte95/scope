@@ -16,7 +16,7 @@ using System.Globalization;
 public class WireCallSchemaManager(SqliteConnection connection)
 {
     /// <summary>The newest wire schema version this manager knows how to produce.</summary>
-    private const int LatestVersion = 2;
+    private const int LatestVersion = 3;
 
     /// <summary>
     /// Ensures the wire metering tables and indexes exist and the schema is at <see cref="LatestVersion"/>.
@@ -37,6 +37,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
         InsertSchemaVersion(1, "Wire metering: wire_calls L0 usage/latency rows");
 
         MigrateToV2();
+        MigrateToV3();
     }
 
     private void EnsureVersionTable()
@@ -92,7 +93,8 @@ public class WireCallSchemaManager(SqliteConnection connection)
                 org_id                TEXT,
                 cc_session_id         TEXT,
                 cc_agent_id           TEXT,
-                cc_parent_agent_id    TEXT
+                cc_parent_agent_id    TEXT,
+                source                TEXT NOT NULL DEFAULT 'proxy'
             );
 
             CREATE INDEX IF NOT EXISTS idx_wire_started  ON wire_calls(started_at);
@@ -129,6 +131,21 @@ public class WireCallSchemaManager(SqliteConnection connection)
         InsertSchemaVersion(2, "CC attribution: cc_session_id, cc_agent_id, cc_parent_agent_id on wire_calls");
     }
 
+    private void MigrateToV3()
+    {
+        // Row provenance (T-2026-06-22-01, Piece 2). 'source' distinguishes proxy-metered rows from
+        // transcript-derived rows: the wire proxy writes 'proxy' (the DEFAULT), a later piece writes
+        // 'transcript' for turns reconstructed from the Claude Code session transcript. Honest
+        // provenance/auditing only -- it changes NO rollup math. NOT NULL DEFAULT 'proxy' means
+        // existing v2 rows and the proxy producer (which does not set Source) both read 'proxy'.
+        // ALTER TABLE ... ADD COLUMN with a constant DEFAULT backfills existing rows to that constant,
+        // so legacy rows become 'proxy' with no separate UPDATE. Guarded by a PRAGMA table_info check
+        // (not a thrown duplicate-column exception) so it is safe to re-run on a partially-migrated db.
+        AddColumnIfMissing("source");
+
+        InsertSchemaVersion(3, "Row provenance: source ('proxy' | 'transcript') on wire_calls");
+    }
+
     private void AddColumnIfMissing(string column)
     {
         if (ColumnExists(column))
@@ -142,6 +159,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
             "cc_session_id" => "ALTER TABLE wire_calls ADD COLUMN cc_session_id TEXT;",
             "cc_agent_id" => "ALTER TABLE wire_calls ADD COLUMN cc_agent_id TEXT;",
             "cc_parent_agent_id" => "ALTER TABLE wire_calls ADD COLUMN cc_parent_agent_id TEXT;",
+            "source" => "ALTER TABLE wire_calls ADD COLUMN source TEXT NOT NULL DEFAULT 'proxy';",
             _ => throw new ArgumentOutOfRangeException(nameof(column), column, "Unknown wire_calls column."),
         };
         cmd.ExecuteNonQuery();
