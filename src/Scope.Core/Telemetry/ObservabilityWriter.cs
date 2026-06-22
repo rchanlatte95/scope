@@ -197,6 +197,10 @@ public sealed class ObservabilityWriter : IDisposable
     /// Upserts an agent session and records a lifecycle event with span association and optional parent session key.
     /// <paramref name="status"/> (OBS-12, schema v14) is the heuristic tool-call outcome
     /// ("success"/"failed"/null) for tool_call events; null for all other event types.
+    /// <paramref name="conversationId"/> (schema v16) is the resume-stable conversation identity
+    /// (transcript filename stem, or host session_id fallback). Set-once via COALESCE.
+    /// <paramref name="machineId"/> (schema v16) is the locally-minted stable machine id for
+    /// cross-machine merge correctness. Set-once via COALESCE.
     /// </summary>
     public void RecordAgentEvent(
         string sessionKey,
@@ -211,12 +215,14 @@ public sealed class ObservabilityWriter : IDisposable
         string? ccSessionId = null,
         string? baseSessionKey = null,
         int? generation = null,
-        string? status = null)
+        string? status = null,
+        string? conversationId = null,
+        string? machineId = null)
     {
         if (_disposed) return;
         try
         {
-            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation);
+            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation, conversationId, machineId);
             _db.InsertAgentEventWithSpan(sessionKey, requestId, eventType, eventDataJson, spanId, status);
         }
         catch (Exception ex)
@@ -246,12 +252,14 @@ public sealed class ObservabilityWriter : IDisposable
         string? origin = null,
         string? ccSessionId = null,
         string? baseSessionKey = null,
-        int? generation = null)
+        int? generation = null,
+        string? conversationId = null,
+        string? machineId = null)
     {
         if (_disposed) return;
         try
         {
-            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation);
+            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation, conversationId, machineId);
         }
         catch (Exception ex)
         {

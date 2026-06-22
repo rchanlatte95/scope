@@ -35,6 +35,46 @@ public sealed record TraceIdentity(string? MachineId, string? WorkspaceId, strin
         return Path.Combine(appData, ".scope", "machine-id");
     }
 
+    /// <summary>
+    /// Returns the stable machine id, minting and persisting it if the id file is absent or
+    /// unreadable. Uses <see cref="Guid.CreateVersion7()"/> (the same UUIDv7 source the
+    /// observability writer uses for span ids) for uniqueness and sortability. If the file cannot
+    /// be written due to an IO error, a freshly-minted in-memory id is returned WITHOUT persisting
+    /// so the caller always gets a non-null value. Never throws; observability must not crash callers.
+    /// </summary>
+    public static string EnsureMachineId()
+    {
+        try
+        {
+            var path = MachineIdPath();
+            var existing = ReadId(path);
+            if (!string.IsNullOrEmpty(existing))
+                return existing;
+
+            // Mint a new UUIDv7 using the same source the writer uses for span ids.
+            var minted = Guid.CreateVersion7().ToString("N");
+            try
+            {
+                var dir = Path.GetDirectoryName(path)!;
+                Directory.CreateDirectory(dir);
+                // Write atomically via a temp file in the same directory, then move.
+                var tmp = path + ".tmp." + Guid.CreateVersion7().ToString("N");
+                File.WriteAllText(tmp, minted);
+                File.Move(tmp, path, overwrite: true);
+                // Validate the persisted value matches what we wrote.
+                var persisted = ReadId(path);
+                return !string.IsNullOrEmpty(persisted) ? persisted : minted;
+            }
+            catch (IOException) { return minted; /* persist failed; return in-memory id */ }
+            catch (UnauthorizedAccessException) { return minted; }
+        }
+        catch
+        {
+            // Absolute last resort: mint in-memory only. Observability never crashes callers.
+            return Guid.CreateVersion7().ToString("N");
+        }
+    }
+
     private static string? ReadId(string path)
     {
         try

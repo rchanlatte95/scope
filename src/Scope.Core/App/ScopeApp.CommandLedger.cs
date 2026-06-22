@@ -281,20 +281,31 @@ public static partial class ScopeApp
                     bb.Tokens + (t.Total ?? 0),
                     bb.Count + 1);
 
-                // ---- by_conversation (universal cc-grouping; T-2026-06-19-04) ----
-                // Partition EVERY in-window session by its host cc id. conversation_id = cc ?? baseKey, so
-                // a session genuinely lacking a cc (NULL/empty cc_session_id: cron without captured cc, MCP,
-                // unattributed) buckets under its base as its OWN singleton conversation -> the partition
-                // covers the SAME full population by_base covers, so the strong invariant holds for every
-                // window. NO cli-only gate: the cc form is universal. launch_count counts DISTINCT base keys
-                // in the group (a cli resume reuses one cc across two bases => one conversation, count 2);
-                // generation_count counts contributing per-generation rows.
+                // ---- by_conversation (universal cc-grouping; T-2026-06-19-04; v16: keyed on conversation_id) ----
+                // Partition EVERY in-window session by its resume-stable conversation id. conversation_id
+                // (schema v16 column) is the transcript stem -- continuous across /resume -- so two
+                // generations with DIFFERENT cc_session_id but the SAME transcript file merge into ONE bucket.
+                // Fallback chain for legacy / non-CC rows:
+                //   1. schema v16: conversation_id column (preferred; transcript-stem based).
+                //   2. cc_session_id (schema v11; pre-v16 rows or non-transcript captures).
+                //   3. baseKey (cron/MCP without a captured cc; stays a singleton).
+                // bucket key = (machine_id, conversationId) composite so cross-machine rows don't merge.
+                // machine_id null collapses to empty string for legacy rows (all null machine_id = one
+                // local bucket -- they were all captured on this machine).
+                // BudgetConversationRow.ConversationId is the conversation component alone (not composite)
+                // so the frontend matches by it; the composite key lives ONLY in conversationBuckets here.
+                var dbConvId = TraceProjection.Str(row, "conversation_id");
+                var dbMachineId = TraceProjection.Str(row, "machine_id");
                 var ccId = TraceProjection.Str(row, "cc_session_id");
-                var conversationId = string.IsNullOrEmpty(ccId) ? baseKey : ccId;
-                if (!conversationBuckets.TryGetValue(conversationId, out var cb))
+                var convIdComponent = !string.IsNullOrEmpty(dbConvId) ? dbConvId
+                    : !string.IsNullOrEmpty(ccId) ? ccId
+                    : baseKey;
+                var machineComponent = string.IsNullOrEmpty(dbMachineId) ? "" : dbMachineId;
+                var bucketKey = machineComponent + " " + convIdComponent;
+                if (!conversationBuckets.TryGetValue(bucketKey, out var cb))
                     cb = (0, 0, 0, new HashSet<string>(StringComparer.Ordinal));
                 cb.Bases.Add(baseKey);
-                conversationBuckets[conversationId] = (
+                conversationBuckets[bucketKey] = (
                     cb.Spend + (sessionCost ?? 0),
                     cb.Tokens + (t.Total ?? 0),
                     cb.GenCount + 1,
@@ -361,12 +372,21 @@ public static partial class ScopeApp
                 .OrderByDescending(r => r.SpendUsd)
                 .ToList();
 
-            // by_conversation: the universal cc-grouped partition (T-2026-06-19-04). launch_count =
-            // distinct base keys in the group; generation_count = contributing rows. sum(spend) == totalCost
-            // by construction (same full population as by_base, partitioned by cc instead of base).
+            // by_conversation: the universal cc-grouped partition (T-2026-06-19-04; v16: keyed on
+            // (machine_id, conversation_id) composite). launch_count = distinct base keys in the group;
+            // generation_count = contributing rows. sum(spend) == totalCost by construction (same full
+            // population as by_base, partitioned by conversation instead of base).
+            // The composite bucket key is "machineComponent conversationIdComponent"; emit only the
+            // conversation component as ConversationId so the frontend API shape is unchanged.
             var byConversation = conversationBuckets
-                .Select(kv => new LedgerConversationRow(
-                    kv.Key, kv.Value.Spend, kv.Value.Bases.Count, kv.Value.GenCount, kv.Value.Tokens))
+                .Select(kv =>
+                {
+                    // Extract the conversation component: everything after the first space separator.
+                    var spaceIdx = kv.Key.IndexOf(' ', StringComparison.Ordinal);
+                    var convIdEmit = spaceIdx >= 0 ? kv.Key[(spaceIdx + 1)..] : kv.Key;
+                    return new LedgerConversationRow(
+                        convIdEmit, kv.Value.Spend, kv.Value.Bases.Count, kv.Value.GenCount, kv.Value.Tokens);
+                })
                 .OrderByDescending(r => r.SpendUsd)
                 .ToList();
 

@@ -619,6 +619,58 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         catch (SqliteException) { /* table already absent */ }
 
         InsertSchemaVersion(15, "Drop orphaned obs_session_generation_hints table (dead since T-2026-06-19-04; no reader/writer)");
+        MigrateToV16();
+    }
+
+    private void MigrateToV16()
+    {
+        // Resume-stable + cross-machine conversation identity (T-2026-06-22-03):
+        //
+        // conversation_id: the Claude Code transcript filename stem. The transcript file persists across a
+        // /resume -- the host session_id changes on resume, the transcript file does NOT -- so keying on
+        // the stem makes the conversation identity stable across resumes. Falls back to the host session_id
+        // when no transcript_path is available (Codex / non-CC hosts). Additive, nullable, set-once
+        // (COALESCE in UpsertAgentSession), no backfill; legacy/cron/MCP rows stay NULL.
+        //
+        // machine_id: the locally-minted UUIDv7 from %APPDATA%/.scope/machine-id. Required for correct
+        // cross-machine merge: two machines may independently use the same cc session_id stem (different
+        // workspaces, forked repos, CI etc.). Bucketing on (machine_id, conversation_id) keeps them
+        // separate. Additive, nullable, set-once, no backfill.
+        //
+        // ALTER TABLE lacks IF NOT EXISTS before SQLite 3.35, wrap each in try/catch.
+        try
+        {
+            using var alterCmd = connection.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN conversation_id TEXT;";
+            alterCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { /* column already exists */ }
+
+        try
+        {
+            using var alterCmd = connection.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN machine_id TEXT;";
+            alterCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { /* column already exists */ }
+
+        try
+        {
+            using var idxCmd = connection.CreateCommand();
+            idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssess_conversation ON obs_agent_sessions(conversation_id);";
+            idxCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { }
+
+        try
+        {
+            using var idxCmd = connection.CreateCommand();
+            idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssess_machine ON obs_agent_sessions(machine_id);";
+            idxCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { }
+
+        InsertSchemaVersion(16, "conversation_id + machine_id on obs_agent_sessions (resume-stable + cross-machine-safe conversation grouping)");
     }
 
     private void InsertSchemaVersion(int version, string description)
