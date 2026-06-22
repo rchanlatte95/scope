@@ -114,6 +114,30 @@ public static class ClaudeCodeTranscriptReader
         return ReadTurnsFromLines(SplitLines(content), ccSessionId);
     }
 
+    /// <summary>
+    /// Returns the default Claude Code projects transcript directory for <paramref name="projectCwd"/>.
+    /// The directory is <c>&lt;userprofile&gt;/.claude/projects/&lt;encoded&gt;</c> where the encoding
+    /// (verified against real Claude Code directory names) replaces each of <c>\</c>, <c>/</c>, and
+    /// <c>:</c> with <c>-</c>. Example: <c>C:\Users\owner\Desktop\scope</c> →
+    /// <c>C--Users-owner-Desktop-scope</c> (the colon AND the first backslash both become <c>-</c>,
+    /// yielding the double dash). Host-shape knowledge is confined here per the platform-independence rule.
+    /// Never throws; returns the computed path string (caller checks existence).
+    /// </summary>
+    /// <param name="projectCwd">The project working directory to encode (e.g. the current working directory).</param>
+    /// <returns>The absolute path to the Claude Code projects transcript directory for this project.</returns>
+    public static string ResolveProjectsTranscriptDir(string projectCwd)
+    {
+        // Claude Code encoding (verified): replace each of \, /, and : with -.
+        // A Windows path like C:\Users\owner\Desktop\scope becomes C--Users-owner-Desktop-scope
+        // because the leading C: loses the colon (-) and the \ becomes -, producing C--.
+        var encoded = (projectCwd ?? string.Empty)
+            .Replace('\\', '-')
+            .Replace('/', '-')
+            .Replace(':', '-');
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".claude", "projects", encoded);
+    }
+
     private static IEnumerable<string> SplitLines(string content)
     {
         using var reader = new StringReader(content);
