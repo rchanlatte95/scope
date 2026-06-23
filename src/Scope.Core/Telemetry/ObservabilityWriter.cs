@@ -198,7 +198,9 @@ public sealed class ObservabilityWriter : IDisposable
     /// <paramref name="status"/> (OBS-12, schema v14) is the heuristic tool-call outcome
     /// ("success"/"failed"/null) for tool_call events; null for all other event types.
     /// <paramref name="conversationId"/> (schema v16) is the resume-stable conversation identity
-    /// (transcript filename stem, or host session_id fallback). Set-once via COALESCE.
+    /// (transcript filename stem, or host session_id fallback). LAST-WRITE-WINS-WHEN-PRESENT: a
+    /// non-null value overwrites the stored value; null leaves it untouched. Only the tool-call
+    /// path supplies a non-null value (SessionStart and UserSubmit pass null to avoid phantom binds).
     /// <paramref name="machineId"/> (schema v16) is the locally-minted stable machine id for
     /// cross-machine merge correctness. Set-once via COALESCE.
     /// </summary>

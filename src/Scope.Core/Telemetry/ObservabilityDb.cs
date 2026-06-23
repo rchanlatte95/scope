@@ -288,6 +288,14 @@ public class ObservabilityDb(SqliteConnection connection)
     /// are SET-ONCE via COALESCE (a generation never re-points). Null on cron/MCP/host-provided/legacy
     /// rows: a NULL generation is read as 0 and a NULL base as the session_key itself (forward-only).
     /// </para>
+    /// <para>
+    /// <paramref name="conversationId"/> (schema v16, resume-stable fix) is the transcript filename stem,
+    /// bound LAST-WRITE-WINS-WHEN-PRESENT: a non-null incoming value OVERWRITES the stored value (so
+    /// a later tool-call report of the real sustained transcript heals a phantom set by SessionStart on
+    /// <c>/resume</c>); a null incoming value leaves the stored value untouched. Only
+    /// <see cref="RecordToolCall"/> supplies a non-null value; SessionStart and UserSubmit pass null
+    /// so they never freeze the id to a phantom transcript.
+    /// </para>
     /// </summary>
     public void UpsertAgentSession(string sessionKey, string agentType, string agentSubtype, string? parentSessionKey = null, string? origin = null, string? ccSessionId = null, string? baseSessionKey = null, int? generation = null, string? conversationId = null, string? machineId = null)
     {
@@ -306,7 +314,7 @@ public class ObservabilityDb(SqliteConnection connection)
                 cc_session_id = COALESCE(obs_agent_sessions.cc_session_id, $ccSessionId),
                 base_session_key = COALESCE(obs_agent_sessions.base_session_key, $baseKey),
                 generation = COALESCE(obs_agent_sessions.generation, $generation),
-                conversation_id = COALESCE(obs_agent_sessions.conversation_id, $conversationId),
+                conversation_id = COALESCE($conversationId, obs_agent_sessions.conversation_id),
                 machine_id = COALESCE(obs_agent_sessions.machine_id, $machineId);
             """;
         cmd.Parameters.AddWithValue("$key", sessionKey);
