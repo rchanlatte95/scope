@@ -1863,7 +1863,13 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         };
     }
 
-    private static string? ParseEventToolUseId(string raw)
+    /// <summary>
+    /// Extracts <c>tool_use_id</c> from a raw <c>event_data_json</c> string.
+    /// Returns null when the JSON is absent, unparseable, or has no <c>tool_use_id</c> string property.
+    /// Exposed as internal so <see cref="ObservabilityDb"/> can reuse it at insert time without
+    /// re-inventing the JSON parse (ST-01 requirement: prefer reuse over duplication).
+    /// </summary>
+    internal static string? ParseEventToolUseId(string? raw)
     {
         if (string.Equals(raw, "-", StringComparison.Ordinal) || string.IsNullOrEmpty(raw)) return null;
         try

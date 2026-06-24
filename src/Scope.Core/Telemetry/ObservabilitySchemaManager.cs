@@ -671,6 +671,59 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         catch (SqliteException) { }
 
         InsertSchemaVersion(16, "conversation_id + machine_id on obs_agent_sessions (resume-stable + cross-machine-safe conversation grouping)");
+        MigrateToV17();
+    }
+
+    private void MigrateToV17()
+    {
+        // tool_use_id first-class column on obs_agent_events (T-2026-06-23-01 ST-01):
+        // The tool_use_id is already embedded in event_data_json for tool_call events but
+        // cannot be queried or indexed efficiently from there. Promoting it to a first-class
+        // column enables:
+        //   - Direct SQL join: obs_agent_events.tool_use_id -> wire_calls.tool_use_ids[]
+        //   - O(1) index lookup instead of per-row JSON parse
+        //   - BuildToolUseOwnerMap (ST-03) reads this column to build the attributor's input
+        //
+        // The column is populated on INSERT from the value the writer already has parsed.
+        // Backfill: existing rows are updated from event_data_json using JSON_EXTRACT so
+        // historical tool_call rows gain the column without re-indexing.
+        //
+        // Forward-only, nullable; rows with no tool_use_id in JSON stay NULL.
+        // ALTER TABLE lacks IF NOT EXISTS before SQLite 3.35, wrap in try/catch.
+        try
+        {
+            using var alterCmd = connection.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE obs_agent_events ADD COLUMN tool_use_id TEXT;";
+            alterCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { /* column already exists */ }
+
+        try
+        {
+            using var idxCmd = connection.CreateCommand();
+            idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obsagent_tooluse ON obs_agent_events(tool_use_id);";
+            idxCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { }
+
+        // Backfill: for existing rows where tool_use_id IS NULL, extract it from event_data_json.
+        // JSON_EXTRACT is idempotent and safe: rows where the JSON has no "tool_use_id" key stay NULL.
+        // Only rows with event_data_json IS NOT NULL are touched (NULL json -> no parse attempt).
+        try
+        {
+            using var backfillCmd = connection.CreateCommand();
+            backfillCmd.CommandText = """
+                UPDATE obs_agent_events
+                SET tool_use_id = JSON_EXTRACT(event_data_json, '$.tool_use_id')
+                WHERE tool_use_id IS NULL
+                  AND event_data_json IS NOT NULL
+                  AND JSON_EXTRACT(event_data_json, '$.tool_use_id') IS NOT NULL;
+                """;
+            backfillCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { /* best-effort backfill; forward writes always populate */ }
+
+        InsertSchemaVersion(17, "tool_use_id first-class column + index on obs_agent_events (T-2026-06-23-01 ST-01; backfilled from event_data_json)");
     }
 
     private void InsertSchemaVersion(int version, string description)
