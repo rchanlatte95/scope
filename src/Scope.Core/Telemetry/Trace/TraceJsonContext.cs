@@ -21,6 +21,9 @@ using System.Text.Json.Serialization;
 [JsonSerializable(typeof(TraceEnvelope<RollupBody>))]
 [JsonSerializable(typeof(TraceEnvelope<TopActionsBody>))]
 [JsonSerializable(typeof(TraceEnvelope<WireBody>))]
+// ST-08: conversation + CLI-session rollup envelopes
+[JsonSerializable(typeof(TraceEnvelope<ConversationRollupBody>))]
+[JsonSerializable(typeof(TraceEnvelope<CliSessionRollupBody>))]
 // packet envelopes
 [JsonSerializable(typeof(TraceEnvelope<PacketSessionsListBody>))]
 [JsonSerializable(typeof(TraceEnvelope<PacketSessionGraphBody>))]
@@ -80,4 +83,12 @@ public static class TraceJson
     /// </summary>
     public static string Serialize(TraceSessionDeleteResult r)
         => JsonSerializer.Serialize(r, TraceJsonContext.Default.TraceSessionDeleteResult);
+
+    /// <summary>Serializes a conversation rollup envelope (ST-08).</summary>
+    public static string Serialize(TraceEnvelope<ConversationRollupBody> e)
+        => JsonSerializer.Serialize(e, TraceJsonContext.Default.TraceEnvelopeConversationRollupBody);
+
+    /// <summary>Serializes a CLI-session rollup envelope (ST-08).</summary>
+    public static string Serialize(TraceEnvelope<CliSessionRollupBody> e)
+        => JsonSerializer.Serialize(e, TraceJsonContext.Default.TraceEnvelopeCliSessionRollupBody);
 }

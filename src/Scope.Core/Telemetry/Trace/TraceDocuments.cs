@@ -552,4 +552,114 @@ public sealed class TraceDocuments(ObservabilityAuditDb db, TraceIdentity identi
         return TraceJson.Serialize(Wrap(TraceSchema.KindWire,
             IsPacket(tier) ? TraceSchema.TierPacket : TraceSchema.TierLocalFull, body, null));
     }
+
+    // -----------------------------------------------------------------------
+    // conversation_rollup (ST-08, additive)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds and serializes the conversation-level rollup envelope for <paramref name="scopeConversationId"/>.
+    /// Partitions transcript and proxy wire rows across all sessions bound to this conversation,
+    /// with an honest remainder bucket for unattributed rows (R2/R3). Token counts are exact from
+    /// wire_calls; cost is not re-derived here (see <see cref="RollupBody"/> for per-session cost).
+    /// An absent obs/wire schema yields an empty but coherent response, never a throw.
+    /// </summary>
+    public string ConversationRollup(string scopeConversationId, string tier)
+    {
+        var data = HasData ? db.ComputeConversationRollup(scopeConversationId) : null;
+
+        List<ConversationSessionSlice> sessions;
+        ConversationSessionSlice remainder;
+        long totalInput, totalOutput, totalTokens;
+
+        if (data == null || data.SessionSlices.Count == 0)
+        {
+            sessions = [];
+            remainder = new ConversationSessionSlice("", 0, 0, 0, 0, 0, 0);
+            totalInput = 0;
+            totalOutput = 0;
+            totalTokens = 0;
+        }
+        else
+        {
+            sessions = data.SessionSlices
+                .Select(s => new ConversationSessionSlice(
+                    s.SessionKey,
+                    s.InputTokens,
+                    s.OutputTokens,
+                    s.CacheCreationTokens,
+                    s.CacheReadTokens,
+                    TotalTokens: s.InputTokens + s.OutputTokens + s.CacheCreationTokens + s.CacheReadTokens,
+                    s.RowCount))
+                .ToList();
+            remainder = new ConversationSessionSlice(
+                "",
+                data.Remainder.InputTokens,
+                data.Remainder.OutputTokens,
+                data.Remainder.CacheCreationTokens,
+                data.Remainder.CacheReadTokens,
+                TotalTokens: data.Remainder.InputTokens + data.Remainder.OutputTokens + data.Remainder.CacheCreationTokens + data.Remainder.CacheReadTokens,
+                data.Remainder.RowCount);
+            totalInput = data.TotalInputTokens;
+            totalOutput = data.TotalOutputTokens;
+            totalTokens = data.TotalInputTokens + data.TotalOutputTokens + data.TotalCacheCreationTokens + data.TotalCacheReadTokens;
+        }
+
+        var body = new ConversationRollupBody(
+            scopeConversationId, sessions, remainder, totalInput, totalOutput, totalTokens);
+        return TraceJson.Serialize(Wrap(TraceSchema.KindConversationRollup,
+            IsPacket(tier) ? TraceSchema.TierPacket : TraceSchema.TierLocalFull, body, null));
+    }
+
+    // -----------------------------------------------------------------------
+    // cli_session_rollup (ST-08, additive)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds and serializes the CLI-session rollup envelope for <paramref name="baseSessionKey"/>.
+    /// Groups all sessions whose <c>base_session_key</c> equals the given key, then computes wire
+    /// token totals for each. Returns a single-row summary. An absent obs/wire schema returns an
+    /// empty but coherent response, never a throw.
+    /// </summary>
+    public string CliSessionRollup(string baseSessionKey, string tier)
+    {
+        var rows = new List<CliSessionRollupRow>();
+
+        if (HasData)
+        {
+            var sessionKeys = db.GetSessionKeysByBaseSessionKey(baseSessionKey);
+            if (sessionKeys.Count > 0)
+            {
+                long totalInput = 0, totalOutput = 0, totalCacheCreate = 0, totalCacheRead = 0;
+
+                // For each session, get wire token totals via the existing rollup path.
+                // We reuse GetFullTrace-based rollup: tokens from obs_agent_spans (exact) or
+                // fallback from wire rows as computed by TraceRollup. To keep it simple and
+                // consistent, we read the token aggregates from each session's rollup body.
+                foreach (var sk in sessionKeys)
+                {
+                    var rbody = RollupBody(sk);
+                    totalInput += rbody.Totals.Tokens.Input ?? 0;
+                    totalOutput += rbody.Totals.Tokens.Output ?? 0;
+                    totalCacheCreate += rbody.Totals.Tokens.CacheCreation ?? 0;
+                    totalCacheRead += rbody.Totals.Tokens.CacheRead ?? 0;
+                }
+
+                var totalTokens = totalInput + totalOutput + totalCacheCreate + totalCacheRead;
+                rows.Add(new CliSessionRollupRow(
+                    BaseSessionKey: baseSessionKey,
+                    SessionCount: sessionKeys.Count,
+                    InputTokens: totalInput,
+                    OutputTokens: totalOutput,
+                    CacheCreationTokens: totalCacheCreate,
+                    CacheReadTokens: totalCacheRead,
+                    TotalTokens: totalTokens,
+                    TokenSource: "rollup"));
+            }
+        }
+
+        var body = new CliSessionRollupBody(rows);
+        return TraceJson.Serialize(Wrap(TraceSchema.KindCliSessionRollup,
+            IsPacket(tier) ? TraceSchema.TierPacket : TraceSchema.TierLocalFull, body, null));
+    }
 }
