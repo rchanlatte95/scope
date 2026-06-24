@@ -1105,7 +1105,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
         AssignTemporalParents(merged);
         EnrichSpanCosts(merged);
-        AnnotateWireTokens(merged);
+        AnnotateWireTokens(merged, filters.RunKey);
         ResolveSpanModels(merged);
 
         return merged;
@@ -1516,7 +1516,21 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     /// intersects), no <c>_wire_*</c> annotation is written and behavior is identical to today
     /// (spans keep exact/estimate/unknown token sources). Never throws.
     /// </summary>
-    private void AnnotateWireTokens(List<Dictionary<string, object?>> entries)
+    /// <summary>
+    /// Derives a stable, non-colliding synthetic span id from a session key. Used to synthesize a
+    /// session-root span for span-less sessions (ST-05). The id is deterministic (same session key
+    /// always produces the same synthetic id) and does not collide with real UUIDv7 span ids because
+    /// the "synth-" prefix is never produced by the UUIDv7 generator.
+    /// </summary>
+    internal static string SyntheticSessionRootId(string sessionKey)
+    {
+        // Use the session key itself (already a stable Scope-owned id) as the anchor. Prefix with
+        // "synth-" to namespace it away from real UUIDs. Truncate to keep the id compact.
+        var trimmed = sessionKey.Length > 32 ? sessionKey[..32] : sessionKey;
+        return $"synth-{trimmed}";
+    }
+
+    private void AnnotateWireTokens(List<Dictionary<string, object?>> entries, string? tracedSessionKey)
     {
         if (!HasWireCallsTable()) return;
 
@@ -1530,7 +1544,34 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             var id = Get(e, "id");
             if (!(string.Equals(id, "-", StringComparison.Ordinal))) spanRows[id] = e;
         }
-        if (spanRows.Count == 0) return; // no spans at all -> nothing for either pass to attribute to
+
+        // ST-05: span-less session anchor. When a session has zero spans (e.g. an interactive session
+        // that never dispatched a sub-agent), the header pass has no target to attribute wire rows to.
+        // Synthesize a stable session-root span row, inject it into both the entries list (so it appears
+        // in the GetFullTrace output and TraceRollup.Compute picks it up as a by_task row) and spanRows
+        // (so AnnotateWireTokensByHeader can attribute to it). The synthetic row's subject id is
+        // deterministic and never collides with real UUIDv7 span ids (different prefix).
+        if (spanRows.Count == 0)
+        {
+            if (tracedSessionKey is null or "") return; // no session key and no spans -> nothing to attribute
+
+            var synthId = SyntheticSessionRootId(tracedSessionKey);
+            var synthRow = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["_source"] = "span",
+                ["id"] = synthId,
+                ["session_key"] = tracedSessionKey,
+                ["parent_span_id"] = null,
+                ["_parent_span_id"] = null,
+                // started_at/completed_at: null is safe; DurationMs returns 0 for null.
+                ["started_at"] = null,
+                ["completed_at"] = null,
+                // Mark as synthetic so consumers can distinguish it from real spans if needed.
+                ["_synthetic_session_root"] = true,
+            };
+            spanRows[synthId] = synthRow;
+            entries.Add(synthRow); // added to the merged rows so TraceRollup.Compute sees it
+        }
 
         // Collect the tool_use_ids actually present on this trace's events (and the resolved span
         // each one points at). Only ids present here can produce a join, so we never need to scan
@@ -1602,7 +1643,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         // turns (no tool_use_ids) too, fixing the known CR-M1 undercount on the interactive path.
         // CRITICAL INVARIANT: it consumes ONLY rows not already in consumedWireIds, so cron numbers
         // (whose rows are all consumed above) are byte-identical to before this pass existed.
-        AnnotateWireTokensByHeader(spanRows, wireRows, acc, consumedWireIds);
+        AnnotateWireTokensByHeader(spanRows, wireRows, acc, consumedWireIds, tracedSessionKey);
 
         foreach (var (span, a) in acc)
         {
@@ -1628,6 +1669,16 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     /// it captures text-only turns (which carry no tool_use_ids) too, fixing the known CR-M1 undercount
     /// on the interactive path.
     /// <para>
+    /// ST-04 (durable conversation identity): <c>source='transcript'</c> wire rows are attributed via
+    /// conversation-global deterministic assignment (<see cref="TranscriptRowAttributor.Assign"/>) rather
+    /// than the broad conversation_id match. The assignment runs over ALL sessions sharing this session's
+    /// conversation (same scope_conversation_id / conversation_id on the same machine), then this trace
+    /// takes only the rows assigned to its own session key. Rows assigned to sibling sessions or in the
+    /// remainder are SKIPPED here (not attributed to any session — ST-08 will surface the remainder
+    /// separately). The old conversation_id broad-match for transcript rows is removed to eliminate
+    /// duplication.
+    /// </para>
+    /// <para>
     /// No double count vs the tool_use_id pass: a row is processed here ONLY if it is not already in
     /// <paramref name="consumedWireIds"/>, and it is added to that set the moment it contributes here,
     /// so each wire row is counted EXACTLY ONCE across both passes. Cron rows are all consumed by the
@@ -1637,13 +1688,14 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     /// Binding (within the one session this trace projects):
     /// </para>
     /// <list type="bullet">
-    ///   <item>Per-subagent: a leftover wire row whose <c>cc_agent_id</c> equals a span's
-    ///         <c>agent_ref</c> (the host-assigned sub-agent id, the same id the wire header carries)
-    ///         attributes to that span.</item>
-    ///   <item>Session / parent-only: a leftover wire row with no matching sub-agent span (the parent's
-    ///         own turns, including text-only turns) attributes to the session's root span (the earliest
-    ///         top-level span). nested spend (<c>cc_parent_agent_id</c>) lands on the parent's span via
-    ///         the same root fallback when its <c>cc_agent_id</c> has no own span.</item>
+    ///   <item>Transcript rows: attributed via conversation-global assignment. Own rows anchor to the
+    ///         matching sub-agent span (via tool_use_id -> span) when one exists, else to the session
+    ///         root span (the earliest top-level span, or the synthesized session-root for span-less
+    ///         sessions — ST-05).</item>
+    ///   <item>Per-subagent (non-transcript): a leftover wire row whose <c>cc_agent_id</c> equals a
+    ///         span's <c>agent_ref</c> attributes to that span.</item>
+    ///   <item>Session / parent-only (non-transcript): a leftover wire row with no matching sub-agent
+    ///         span attributes to the session root span.</item>
     /// </list>
     /// Honest-empty and never-throws: when no span resolves the session, or no leftover wire row binds,
     /// no annotation is written and behavior is identical to the tool_use_id-only pass. The accumulators
@@ -1654,31 +1706,40 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         Dictionary<string, Dictionary<string, object?>> spanRows,
         List<Dictionary<string, object?>> wireRows,
         Dictionary<string, WireAcc> acc,
-        HashSet<string> consumedWireIds)
+        HashSet<string> consumedWireIds,
+        string? tracedSessionKey)
     {
+        // ST-05: spanRows may contain a synthesized session-root row for span-less sessions;
+        // after ST-05 injection above, spanRows is never empty when tracedSessionKey is set.
         if (spanRows.Count == 0) return;
 
-        // Fast exit: if no UNCONSUMED wire row carries a cc_session_id header, there is nothing for the
-        // header pass to bind. This keeps the steady state (cron-only / pre-header dbs) free of the
-        // extra bridge/schema/agent_ref queries below -- they run only when interactive header rows
-        // actually exist as leftovers.
-        var hasLeftoverHeaderRow = false;
+        // Fast exit: if no UNCONSUMED wire row carries a cc_session_id header (non-transcript path)
+        // AND there are no unconsumed transcript rows, there is nothing for the header pass to bind.
+        // Check for either: a header row OR a transcript row among leftovers.
+        var hasLeftoverHeaderOrTranscriptRow = false;
         foreach (var w in wireRows)
         {
             if (consumedWireIds.Contains(Get(w, "id"))) continue;
             var cc = Get(w, "cc_session_id");
-            if (!string.Equals(cc, "-", StringComparison.Ordinal) && cc.Length > 0) { hasLeftoverHeaderRow = true; break; }
+            var hasHeader = !string.Equals(cc, "-", StringComparison.Ordinal) && cc.Length > 0;
+            var isTranscript = string.Equals(Get(w, "source"), "transcript", StringComparison.Ordinal);
+            if (hasHeader || isTranscript) { hasLeftoverHeaderOrTranscriptRow = true; break; }
         }
-        if (!hasLeftoverHeaderRow) return;
+        if (!hasLeftoverHeaderOrTranscriptRow) return;
 
-        // The merged trace projects exactly one Scope session; take its session key from any span row.
-        string? scopeSessionKey = null;
-        foreach (var (_, r) in spanRows)
+        // Resolve the traced session key: prefer the explicitly-threaded parameter (available even
+        // for span-less sessions); fall back to reading from any span row (for traces with real spans
+        // where the caller may have passed null).
+        string? scopeSessionKey = tracedSessionKey;
+        if (string.IsNullOrEmpty(scopeSessionKey))
         {
-            var sk = Get(r, "session_key");
-            if (!string.Equals(sk, "-", StringComparison.Ordinal) && sk.Length > 0) { scopeSessionKey = sk; break; }
+            foreach (var (_, r) in spanRows)
+            {
+                var sk = Get(r, "session_key");
+                if (!string.Equals(sk, "-", StringComparison.Ordinal) && sk.Length > 0) { scopeSessionKey = sk; break; }
+            }
         }
-        if (scopeSessionKey == null) return;
+        if (string.IsNullOrEmpty(scopeSessionKey)) return;
 
         // Candidate CC session ids that bind to this Scope session:
         //  - the D3 bridge value (obs_agent_sessions.cc_session_id), set by the hook for a Scope-launched
@@ -1697,12 +1758,17 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         var ccSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
         var bridged = ResolveCcSessionId(scopeSessionKey);
         if (!string.IsNullOrEmpty(bridged)) ccSessionIds.Add(bridged);
-        // conversation_id (schema v16): transcript-source wire rows key on the transcript stem
-        // (= conversation_id), which equals cc_session_id on the first-ever session but diverges
-        // on resume (the transcript file is continuous; the host session_id is not). Adding it as
-        // a third candidate ensures transcript-cost rows still attribute on resume.
-        var convId = ResolveConversationId(scopeSessionKey);
-        if (!string.IsNullOrEmpty(convId)) ccSessionIds.Add(convId);
+        // The conversation_id (resume-stable transcript stem) is a THIRD candidate for NON-transcript
+        // (proxy/wire) rows: on /resume the host cc_session_id changes but the stem does not, so a proxy
+        // row keyed on the stem must still attribute to this session. We add it to ccSessionIds, which is
+        // consulted ONLY by the non-transcript branch of the main loop below.
+        //
+        // ST-04 scope-correction: this conversation_id candidate is NOT used to attribute TRANSCRIPT rows.
+        // Transcript rows (source='transcript') are routed by the conversation-global assignment + the
+        // single-session fast-path below, BEFORE the ccSessionIds non-transcript branch is reached, so the
+        // stem never broad-matches a sibling session's transcript turn (the original duplication defect).
+        var convIdForCandidate = ResolveConversationId(scopeSessionKey);
+        if (!string.IsNullOrEmpty(convIdForCandidate)) ccSessionIds.Add(convIdForCandidate);
 
         // Map each span's agent_ref (host sub-agent id) to its span id for per-subagent binding.
         // agent_ref is a schema-v5 column; read it via a dedicated tolerant query (NOT in the main
@@ -1714,6 +1780,8 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
 
         // Session root span: the earliest top-level span (parent_span_id absent or not a known span).
+        // For span-less sessions, the synthesized session-root row (injected by AnnotateWireTokens) is
+        // the only entry in spanRows, so it becomes the root span automatically.
         // spanRows enumeration order is not guaranteed, so pick the one with the smallest started_at.
         string? rootSpanId = null;
         string? rootStarted = null;
@@ -1723,7 +1791,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             var hasKnownParent = !string.Equals(parent, "-", StringComparison.Ordinal) && parent.Length > 0 && spanRows.ContainsKey(parent);
             if (hasKnownParent) continue; // not top-level
             var started = Get(r, "started_at");
-            if (rootStarted == null || string.Compare(started, rootStarted, StringComparison.Ordinal) < 0)
+            if (rootStarted == null || string.Compare(started ?? "", rootStarted ?? "", StringComparison.Ordinal) < 0)
             {
                 rootStarted = started;
                 rootSpanId = id;
@@ -1731,11 +1799,116 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
         if (rootSpanId == null) return; // no top-level span to anchor session/parent-only spend
 
+        // ---- ST-04: Conversation-global transcript-row assignment ----
+        // For transcript-source wire rows, compute ONE global assignment over the full conversation (all
+        // sessions sharing this session's conversation), then take only the rows this session owns.
+        // This is computed lazily (only if unconsumed transcript rows exist as leftovers) to avoid the
+        // extra DB queries on non-interactive / cron sessions.
+        TranscriptOwnerAssignment? transcriptAssignment = null;
+        HashSet<string>? ownedTranscriptWireIds = null; // wire row ids owned by this session
+
+        // Check whether any unconsumed transcript rows exist before computing the assignment.
+        var hasUnconsumedTranscript = false;
+        foreach (var w in wireRows)
+        {
+            if (consumedWireIds.Contains(Get(w, "id"))) continue;
+            if (string.Equals(Get(w, "source"), "transcript", StringComparison.Ordinal))
+            {
+                hasUnconsumedTranscript = true;
+                break;
+            }
+        }
+
+        if (hasUnconsumedTranscript)
+        {
+            // Resolve S: all session keys sharing this session's conversation (same machine).
+            var conversationSessionKeys = ResolveConversationSessionKeys(scopeSessionKey);
+
+            if (conversationSessionKeys.Count <= 1)
+            {
+                // ---- Single-session fast-path (|S| == 1) ----
+                // When this session is the ONLY session in its conversation, there is no ambiguity to
+                // resolve: EVERY transcript wire row belonging to this session (matched by its own
+                // cc-id candidate set — the cc_session_id and/or the resume-stable stem) is owned by it.
+                // This bypasses the Tier-1/Tier-2 window machinery, whose sole purpose is to disambiguate
+                // ownership among >=2 sessions. It is provably non-duplicating (one session owns all rows)
+                // and provably loss-free (no transcript row falls to remainder for lack of a tool_use_id
+                // owner or a bounding event window). This restores the pre-ST-04 single-session behavior
+                // (transcript rows attributed by cc_session_id) without re-introducing the cross-session
+                // broad-match that caused the duplication defect (that only applies when |S| >= 2).
+                ownedTranscriptWireIds = LoadTranscriptWireRowIdsForCcSet(ccSessionIds);
+            }
+            else
+            {
+                // ---- Multi-session: conversation-global disambiguation (|S| >= 2) ----
+                // Load conversation-level inputs for the attributor.
+                var toolUseOwners = BuildToolUseOwnerMap(conversationSessionKeys);
+                var sessionWindows = BuildSessionWindows(conversationSessionKeys);
+                var convId = ResolveConversationId(scopeSessionKey);
+                var transcriptRows = string.IsNullOrEmpty(convId) ? [] : LoadTranscriptRows(convId);
+
+                // Run the pure attributor: CONVERSATION-GLOBAL, one pass for all sibling sessions.
+                transcriptAssignment = TranscriptRowAttributor.Assign(transcriptRows, toolUseOwners, sessionWindows);
+
+                // Owned by THIS session (X): rows where the assignment says X is the owner.
+                ownedTranscriptWireIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var (wireRowId, ownerSessionKey) in transcriptAssignment.OwnerByWireRowId)
+                {
+                    if (string.Equals(ownerSessionKey, scopeSessionKey, StringComparison.Ordinal))
+                        ownedTranscriptWireIds.Add(wireRowId);
+                }
+            }
+        }
+
+        // Build a map of tool_use_id -> span id for the transcript row anchor step. When a transcript
+        // row carries tool_use_ids that resolve to spans in THIS trace, anchor it to the specific span
+        // (matching the tool_use_id pass logic); otherwise anchor to the root span.
+        // Re-use the event->span mapping already indexed in the Tier-1 pass (AnnotateWireTokens builds
+        // spanByToolUseId); we need a lightweight re-derivation here for the subset in spanRows.
+        // Since we don't have access to the Tier-1 map here, we re-read it from the wire rows directly:
+        // for each transcript row's tool_use_ids, if any resolve to a span in spanRows (via the
+        // consumedWireIds map — the tool_use_id pass has already consumed them), we already can't
+        // re-check. Instead we use the simpler strategy: transcript rows anchor to the root span unless
+        // the row's tool_use_ids appear in a span row's event. We'll use a two-step:
+        // 1. If the transcript row was already consumed by the tool_use_id pass (in consumedWireIds),
+        //    it's already attributed to a span — skip it (don't re-count).
+        // 2. Otherwise, anchor to root span (the transcript row is a text-only turn or its tool_use_ids
+        //    had no matching span events in this session — the span-bound rows were consumed in Tier-1).
+
         foreach (var w in wireRows)
         {
             var wireId = Get(w, "id");
             if (consumedWireIds.Contains(wireId)) continue; // leftovers only -> no double count
 
+            var isTranscript = string.Equals(Get(w, "source"), "transcript", StringComparison.Ordinal);
+
+            if (isTranscript)
+            {
+                // ST-04: transcript rows are attributed via the conversation-global assignment only.
+                // A transcript row is attributed to this session ONLY if the assignment says so.
+                // Rows assigned to sibling sessions OR in RemainderRowIds are SKIPPED.
+                if (ownedTranscriptWireIds == null || !ownedTranscriptWireIds.Contains(wireId)) continue;
+
+                // This transcript row is owned by X (this session). Anchor it:
+                // - Prefer a sub-agent span if the row's tool_use_ids link to one; in practice, if
+                //   the Tier-1 pass would have consumed it, it would already be in consumedWireIds.
+                //   Since it's a leftover, its tool_use_ids had no matching span event in this session,
+                //   so we anchor to the root span (the canonical interactive-session home).
+                // NOTE: cc_agent_id is typically absent on transcript rows; root span is always the target.
+                var targetSpan = rootSpanId;
+
+                if (!acc.TryGetValue(targetSpan, out var ta)) { ta = new WireAcc(); acc[targetSpan] = ta; }
+                ta.Input += LongCol(w, "input_tokens");
+                ta.Output += LongCol(w, "output_tokens");
+                ta.CacheCreation += LongCol(w, "cache_creation_tokens");
+                ta.CacheRead += LongCol(w, "cache_read_tokens");
+                ta.Model ??= Get(w, "model") is var tm && !(string.Equals(tm, "-", StringComparison.Ordinal)) ? tm : null;
+                ta.Any = true;
+                consumedWireIds.Add(wireId); // counted exactly once across both passes
+                continue;
+            }
+
+            // Non-transcript rows: keep existing cc_session_id / cc_agent_id behavior.
             var ccSession = Get(w, "cc_session_id");
             if (string.Equals(ccSession, "-", StringComparison.Ordinal) || ccSession.Length == 0) continue; // header-less row
             if (!ccSessionIds.Contains(ccSession)) continue; // belongs to a different session
@@ -1743,18 +1916,18 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             // Per-subagent binding: cc_agent_id -> a span's agent_ref. Otherwise the parent's own spend
             // (including text-only turns) anchors on the session root span.
             var ccAgent = Get(w, "cc_agent_id");
-            string targetSpan;
+            string targetSpanId;
             if (!string.Equals(ccAgent, "-", StringComparison.Ordinal) && ccAgent.Length > 0
                 && spanByAgentRef.TryGetValue(ccAgent, out var subSpan))
             {
-                targetSpan = subSpan;
+                targetSpanId = subSpan;
             }
             else
             {
-                targetSpan = rootSpanId;
+                targetSpanId = rootSpanId;
             }
 
-            if (!acc.TryGetValue(targetSpan, out var a)) { a = new WireAcc(); acc[targetSpan] = a; }
+            if (!acc.TryGetValue(targetSpanId, out var a)) { a = new WireAcc(); acc[targetSpanId] = a; }
             a.Input += LongCol(w, "input_tokens");
             a.Output += LongCol(w, "output_tokens");
             a.CacheCreation += LongCol(w, "cache_creation_tokens");
@@ -1763,6 +1936,96 @@ public class ObservabilityAuditDb(SqliteConnection connection)
             a.Any = true;
             consumedWireIds.Add(wireId); // counted exactly once across both passes
         }
+    }
+
+    /// <summary>
+    /// Resolves the set of session keys that share the same conversation as <paramref name="sessionKey"/>.
+    /// <para>
+    /// Strategy (ST-04): prefer <c>obs_agent_sessions.scope_conversation_id</c> (schema v18, durable
+    /// Scope-minted id) as the grouping key; fall back to <c>conversation_id</c> (schema v16, host stem)
+    /// when <c>scope_conversation_id</c> is absent or null. Always includes <paramref name="sessionKey"/>
+    /// itself. Returns a single-element set when no grouping information is found.
+    /// </para>
+    /// Machine-scope: only sessions with the same machine_id as <paramref name="sessionKey"/> are
+    /// included (cross-machine overlap detection requires the same-machine constraint).
+    /// </summary>
+    private HashSet<string> ResolveConversationSessionKeys(string sessionKey)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal) { sessionKey };
+        try
+        {
+            // Read this session's scope_conversation_id and machine_id.
+            string? scopeConvId = null;
+            string? convId = null;
+            string? machineId = null;
+
+            using (var sessCmd = connection.CreateCommand())
+            {
+                // Try to read scope_conversation_id (v18), conversation_id (v16), and machine_id (v16).
+                // If scope_conversation_id column is absent (pre-v18), fall back to conversation_id.
+                sessCmd.CommandText = """
+                    SELECT scope_conversation_id, conversation_id, machine_id
+                    FROM obs_agent_sessions
+                    WHERE session_key = $key
+                    LIMIT 1;
+                    """;
+                sessCmd.Parameters.AddWithValue("$key", sessionKey);
+                try
+                {
+                    using var reader = sessCmd.ExecuteReaderRetrying();
+                    if (reader.Read())
+                    {
+                        scopeConvId = reader.IsDBNull(0) ? null : reader.GetString(0);
+                        convId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                        machineId = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    }
+                }
+                catch (SqliteException) { /* pre-v16 schema or missing column: degrade */ }
+            }
+
+            // If scope_conversation_id is available, use it to find all sibling sessions (same machine).
+            if (!string.IsNullOrEmpty(scopeConvId) && !string.IsNullOrEmpty(machineId))
+            {
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    SELECT session_key FROM obs_agent_sessions
+                    WHERE scope_conversation_id = $scid
+                      AND machine_id = $mid;
+                    """;
+                cmd.Parameters.AddWithValue("$scid", scopeConvId);
+                cmd.Parameters.AddWithValue("$mid", machineId);
+                try
+                {
+                    using var reader = cmd.ExecuteReaderRetrying();
+                    while (reader.Read())
+                        result.Add(reader.GetString(0));
+                }
+                catch (SqliteException) { /* degrade: return single-element set */ }
+                return result;
+            }
+
+            // Fallback: use conversation_id (host stem) with machine_id scoping.
+            if (!string.IsNullOrEmpty(convId) && !string.IsNullOrEmpty(machineId))
+            {
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    SELECT session_key FROM obs_agent_sessions
+                    WHERE conversation_id = $cid
+                      AND machine_id = $mid;
+                    """;
+                cmd.Parameters.AddWithValue("$cid", convId);
+                cmd.Parameters.AddWithValue("$mid", machineId);
+                try
+                {
+                    using var reader = cmd.ExecuteReaderRetrying();
+                    while (reader.Read())
+                        result.Add(reader.GetString(0));
+                }
+                catch (SqliteException) { /* degrade: return single-element set */ }
+            }
+        }
+        catch (SqliteException) { /* never crash callers */ }
+        return result;
     }
 
     /// <summary>
@@ -2635,6 +2898,54 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
         catch (SqliteException) { /* schema too old; degrade to empty */ }
         return rows;
+    }
+
+    /// <summary>
+    /// Returns the wire-row ids of every <c>source='transcript'</c> row whose <c>cc_session_id</c> is in
+    /// <paramref name="ccSessionIds"/>. Used by the single-session fast-path in the header pass: when a
+    /// conversation has exactly one session, that session owns ALL of its transcript rows (those keyed on
+    /// its own cc_session_id or its resume-stable stem), with no Tier-1/Tier-2 disambiguation and no
+    /// remainder. This deliberately matches on cc_session_id (not conversation_id), so it works even for
+    /// sessions that have no stored <c>conversation_id</c> linkage (e.g. host-provided sessions and
+    /// per-generation rows whose transcript turns are keyed on their own cc id).
+    /// <para>
+    /// Reader-gap: self-ensures both schemas so a lazily-migrated live db does not 500 on the
+    /// <c>source</c> column. Degrades to an empty set on any schema/IO error (never crashes callers).
+    /// </para>
+    /// </summary>
+    private HashSet<string> LoadTranscriptWireRowIdsForCcSet(HashSet<string> ccSessionIds)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (ccSessionIds.Count == 0) return result;
+
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+        if (!HasWireCallsTable()) return result;
+
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            // Parameterize the IN-list explicitly (no string interpolation of values).
+            var paramNames = new List<string>(ccSessionIds.Count);
+            var i = 0;
+            foreach (var cc in ccSessionIds)
+            {
+                var p = "$cc" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                paramNames.Add(p);
+                cmd.Parameters.AddWithValue(p, cc);
+                i++;
+            }
+
+            cmd.CommandText =
+                "SELECT id FROM wire_calls WHERE source = 'transcript' AND cc_session_id IN ("
+                + string.Join(", ", paramNames) + ");";
+
+            using var reader = cmd.ExecuteReaderRetrying();
+            while (reader.Read())
+                result.Add(reader.GetString(0));
+        }
+        catch (SqliteException) { /* schema too old / no source column: degrade to empty */ }
+        return result;
     }
 }
 
