@@ -16,7 +16,10 @@ public static class TranscriptRowAttributor
     /// </summary>
     /// <param name="rows">
     /// All transcript-source wire rows for a single conversation, supplied in transcript order
-    /// (i.e. ascending <c>started_at</c>).
+    /// (i.e. ascending <c>started_at</c>). Rows are deduplicated by <c>WireRowId</c> on entry,
+    /// first-occurrence-wins: transcript rows are PK-unique at the DB level, so this is defensive
+    /// totality for the pure function (it guarantees the output partition is well-defined even if a
+    /// caller passes a duplicate id).
     /// </param>
     /// <param name="toolUseOwners">
     /// Map from <c>tool_use_id</c> to the session that executed it (machine-scoped).
@@ -27,36 +30,52 @@ public static class TranscriptRowAttributor
     /// </param>
     /// <returns>
     /// A <see cref="TranscriptOwnerAssignment"/> whose <c>OwnerByWireRowId</c> and
-    /// <c>RemainderRowIds</c> form a total partition over all input <paramref name="rows"/>.
+    /// <c>RemainderRowIds</c> form a total partition over the DISTINCT input <paramref name="rows"/>.
+    /// The partition is disjoint and exhaustive BY CONSTRUCTION: remainder is built as exactly the
+    /// distinct input WireRowIds that are not owner keys.
     /// </returns>
     public static TranscriptOwnerAssignment Assign(
         IReadOnlyList<TranscriptRow> rows,
         IReadOnlyDictionary<string, ToolUseOwner> toolUseOwners,
         IReadOnlyList<SessionWindow> windows)
     {
-        // --- Phase 1: Tier-1 pass over every row ---
+        // --- Phase 0: defensive dedup by WireRowId, first-occurrence-wins ---
+        // Transcript rows are PK-unique at the DB level; this keeps the pure function total even if a
+        // caller supplies a duplicate id (which would otherwise let one id land in two buckets and
+        // break disjointness, or appear twice in remainder and double-count downstream).
+        var seen = new HashSet<string>(rows.Count, StringComparer.Ordinal);
+        var distinctRows = new List<TranscriptRow>(rows.Count);
+        foreach (var r in rows)
+        {
+            if (seen.Add(r.WireRowId))
+            {
+                distinctRows.Add(r);
+            }
+        }
+
+        // --- Phase 1: Tier-1 pass over every distinct row ---
         // For each row collect the DISTINCT owner SessionKeys across its ToolUseIds where the
         // owner's MachineId matches the row's MachineId. Machine-scope is checked here so that
         // the same tool_use_id on a different machine is never cross-attributed (case M4).
 
-        var owner = new Dictionary<string, string>(rows.Count, StringComparer.Ordinal);   // WireRowId -> SessionKey
-        var remainder = new List<string>();
+        var owner = new Dictionary<string, string>(distinctRows.Count, StringComparer.Ordinal); // WireRowId -> SessionKey
         var anomalies = new List<string>();
 
-        // Track which indices resolved via Tier-1 (true = Tier-1 owned or Tier-1 ambiguous).
-        // Tier-1 ambiguous rows are remainder but not eligible for Tier-2 bracketing.
-        var tier1Resolved = new bool[rows.Count]; // default false
+        // Tier-1 classification per index:
+        //   Owned       = Tier-1 resolved to exactly one session (recorded in owner dict).
+        //   Ambiguous   = Tier-1 saw 2+ sessions (remainder; NOT a Tier-2 candidate, NOT a bracket neighbor).
+        //   (neither)   = no Tier-1 resolution (empty ids, or all ids missing / wrong machine) -> Tier-2.
+        var isTier1Owned = new bool[distinctRows.Count];
+        var isTier1Ambiguous = new bool[distinctRows.Count];
 
-        for (var i = 0; i < rows.Count; i++)
+        for (var i = 0; i < distinctRows.Count; i++)
         {
-            var row = rows[i];
+            var row = distinctRows[i];
             if (row.ToolUseIds.Count == 0)
             {
-                // No tool ids -> cannot do Tier-1; leave for Tier-2.
-                continue;
+                continue; // no tool ids -> Tier-2 candidate
             }
 
-            // Collect distinct owner SessionKeys that are machine-matched.
             var sessionKeys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var id in row.ToolUseIds)
             {
@@ -67,35 +86,26 @@ public static class TranscriptRowAttributor
                 }
             }
 
-            tier1Resolved[i] = true; // row had tool ids; regardless of outcome, it settles here
-
             if (sessionKeys.Count == 1)
             {
-                // Exactly one session -> owned.
                 owner[row.WireRowId] = sessionKeys.Single();
+                isTier1Owned[i] = true;
             }
             else if (sessionKeys.Count >= 2)
             {
-                // Ambiguous: multiple sessions claimed this turn -> remainder + anomaly.
-                remainder.Add(row.WireRowId);
+                isTier1Ambiguous[i] = true;
                 anomalies.Add(
                     $"Row {row.WireRowId}: tool_use_ids resolve to {sessionKeys.Count} distinct sessions " +
                     $"({string.Join(", ", sessionKeys.OrderBy(s => s, StringComparer.Ordinal))}) — ambiguous, sent to remainder.");
             }
-            else
-            {
-                // All tool ids either missing from the map or on a different machine.
-                // Treat as "no Tier-1 resolution": do NOT mark tier1Resolved so we can fall to Tier-2.
-                tier1Resolved[i] = false;
-            }
+            // else sessionKeys.Count == 0: ids present but none machine-matched -> Tier-2 candidate.
         }
 
-        // --- Phase 2: Tier-2 pass over rows that had no Tier-1 resolution ---
-        // These are: rows with empty ToolUseIds, and rows whose ToolUseIds all resolved to a
-        // different machine (or were absent from the map entirely).
+        // --- Phase 2: Tier-2 pass over rows with no Tier-1 resolution ---
+        // Candidates are: empty-id rows, and rows whose ids all missed (absent / wrong machine).
+        // Ambiguous Tier-1 rows are NOT candidates (they already belong to remainder).
 
-        // Pre-parse all session window timestamps once.
-        // Key: SessionKey -> (MachineId, Start, End). Skip windows with unparseable timestamps.
+        // Pre-parse all session window timestamps once. Skip windows with unparseable timestamps.
         var parsedWindows = new List<(string SessionKey, string MachineId, DateTimeOffset Start, DateTimeOffset End)>(windows.Count);
         foreach (var w in windows)
         {
@@ -103,120 +113,78 @@ public static class TranscriptRowAttributor
             {
                 parsedWindows.Add((w.SessionKey, w.MachineId, start, end));
             }
-            // Window with unparseable timestamps is silently skipped (cannot bracket anything).
         }
 
-        for (var i = 0; i < rows.Count; i++)
+        for (var i = 0; i < distinctRows.Count; i++)
         {
-            if (tier1Resolved[i] || owner.ContainsKey(rows[i].WireRowId))
+            if (isTier1Owned[i] || isTier1Ambiguous[i])
             {
-                // Already settled by Tier-1 (either owned or Tier-1 ambiguous remainder).
-                continue;
+                continue; // already settled by Tier-1
             }
 
-            var row = rows[i];
+            var row = distinctRows[i];
 
-            // Attempt to parse this row's timestamp.
             if (!TryParseIso(row.StartedAtIso, out var rowTime))
             {
-                // Unparseable timestamp -> remainder.
-                remainder.Add(row.WireRowId);
-                continue;
+                continue; // unparseable timestamp -> falls through to remainder (not an owner)
             }
 
-            // Collect windows on the SAME machine where Start <= rowTime <= End.
-            // Never compare windows across different machine_ids (cross-machine non-overlap rule).
-            var matchingWindows = new List<(string SessionKey, string MachineId, DateTimeOffset Start, DateTimeOffset End)>();
+            // Collect same-machine windows containing rowTime (closed interval). Never cross machines.
+            var matchingWindows = new List<string>();
             foreach (var pw in parsedWindows)
             {
                 if (!string.Equals(pw.MachineId, row.MachineId, StringComparison.Ordinal))
                 {
-                    continue; // different machine — skip
+                    continue;
                 }
                 if (pw.Start <= rowTime && rowTime <= pw.End)
                 {
-                    matchingWindows.Add(pw);
+                    matchingWindows.Add(pw.SessionKey);
                 }
             }
 
-            if (matchingWindows.Count != 1)
+            if (matchingWindows.Count == 0)
             {
-                // Zero matches (outside every window) or 2+ overlapping windows -> remainder.
-                remainder.Add(row.WireRowId);
+                continue; // |W| == 0: gap between sessions -> remainder
+            }
+
+            if (matchingWindows.Count == 1)
+            {
+                // |W| == 1: time alone disambiguates. Own it — INCLUDING leading/trailing/isolated
+                // text turns (a Tier-1 neighbor on only one side, or none). No two-sided bracketing.
+                owner[row.WireRowId] = matchingWindows[0];
                 continue;
             }
 
-            var candidateSession = matchingWindows[0].SessionKey;
+            // |W| >= 2: same-machine OVERLAP (concurrent resume) = ambiguous.
+            // Own ONLY IF the nearest Tier-1-owned predecessor AND successor both exist and AGREE
+            // on a single session that is in W; otherwise remainder. Bracketing is the overlap
+            // tiebreaker, NOT a general requirement.
+            var predecessorSession = NearestTier1OwnedNeighbor(distinctRows, owner, isTier1Owned, i, forward: false);
+            var successorSession = NearestTier1OwnedNeighbor(distinctRows, owner, isTier1Owned, i, forward: true);
 
-            // Bracketing check: find the nearest Tier-1-owned predecessor and successor in list
-            // order that are themselves Tier-1-resolved (i.e. not in this Tier-2 pass).
-            // Both must agree on candidateSession; otherwise -> remainder.
-            string? predecessorSession = null;
-            string? successorSession = null;
-
-            // Scan backward for nearest Tier-1 owned predecessor.
-            for (var j = i - 1; j >= 0; j--)
+            if (predecessorSession is not null &&
+                successorSession is not null &&
+                string.Equals(predecessorSession, successorSession, StringComparison.Ordinal) &&
+                matchingWindows.Contains(predecessorSession, StringComparer.Ordinal))
             {
-                var prevRow = rows[j];
-                if (tier1Resolved[j] && owner.TryGetValue(prevRow.WireRowId, out var prevSession))
-                {
-                    predecessorSession = prevSession;
-                    break;
-                }
+                owner[row.WireRowId] = predecessorSession;
             }
-
-            // Scan forward for nearest Tier-1 owned successor.
-            for (var j = i + 1; j < rows.Count; j++)
-            {
-                var nextRow = rows[j];
-                if (tier1Resolved[j] && owner.TryGetValue(nextRow.WireRowId, out var nextSession))
-                {
-                    successorSession = nextSession;
-                    break;
-                }
-            }
-
-            // Bracketing rule: both must agree with the candidate, or both must be absent.
-            // "Agree" means the non-null neighbor(s) point to the same session as the candidate.
-            var predecessorAgrees = predecessorSession is null ||
-                                    string.Equals(predecessorSession, candidateSession, StringComparison.Ordinal);
-            var successorAgrees = successorSession is null ||
-                                  string.Equals(successorSession, candidateSession, StringComparison.Ordinal);
-
-            // We need at least one Tier-1 neighbor to exist and agree; if there are NO Tier-1
-            // neighbors at all, we cannot confirm via bracketing -> remainder.
-            // (If both are null it means there are no Tier-1 owned rows at all in the list, so
-            //  there is no bracket to speak of.)
-            var hasBracket = predecessorSession is not null || successorSession is not null;
-
-            if (hasBracket && predecessorAgrees && successorAgrees)
-            {
-                owner[row.WireRowId] = candidateSession;
-            }
-            else
-            {
-                remainder.Add(row.WireRowId);
-            }
+            // else: one-sided, disagreeing, or agreed-session not in W -> remainder.
         }
 
-        // --- Phase 3: Assert the partition invariant ---
-        // OwnerByWireRowId.Keys ∩ RemainderRowIds == ∅
-        // OwnerByWireRowId.Keys ∪ RemainderRowIds == { all input WireRowIds }
-        var allInputIds = new HashSet<string>(rows.Select(r => r.WireRowId), StringComparer.Ordinal);
-        var ownedIds = new HashSet<string>(owner.Keys, StringComparer.Ordinal);
-        var remainderSet = new HashSet<string>(remainder, StringComparer.Ordinal);
-
-        // Disjoint check
-        System.Diagnostics.Debug.Assert(
-            !ownedIds.Overlaps(remainderSet),
-            "PARTITION INVARIANT VIOLATED: a WireRowId appears in both OwnerByWireRowId and RemainderRowIds.");
-
-        // Exhaustive check
-        var union = new HashSet<string>(ownedIds, StringComparer.Ordinal);
-        union.UnionWith(remainderSet);
-        System.Diagnostics.Debug.Assert(
-            union.SetEquals(allInputIds),
-            "PARTITION INVARIANT VIOLATED: union of owned and remainder does not equal all input WireRowIds.");
+        // --- Phase 3: build the partition STRUCTURALLY ---
+        // RemainderRowIds = distinct input WireRowIds NOT present as an owner key. This makes the
+        // partition disjoint + exhaustive by construction (no row can be in both buckets, and every
+        // distinct input row is in exactly one). No Debug.Assert is load-bearing here.
+        var remainder = new List<string>(distinctRows.Count);
+        foreach (var r in distinctRows)
+        {
+            if (!owner.ContainsKey(r.WireRowId))
+            {
+                remainder.Add(r.WireRowId);
+            }
+        }
 
         return new TranscriptOwnerAssignment(
             OwnerByWireRowId: owner,
@@ -228,10 +196,52 @@ public static class TranscriptRowAttributor
     // Helpers
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// Returns the SessionKey of the nearest Tier-1-OWNED row in transcript (list) order, scanning
+    /// outward from <paramref name="index"/> in the given direction; null if none exists. Only
+    /// Tier-1-owned rows count as neighbors (ambiguous or Tier-2 rows are skipped).
+    /// </summary>
+    private static string? NearestTier1OwnedNeighbor(
+        List<TranscriptRow> rows,
+        Dictionary<string, string> owner,
+        bool[] isTier1Owned,
+        int index,
+        bool forward)
+    {
+        if (forward)
+        {
+            for (var j = index + 1; j < rows.Count; j++)
+            {
+                if (isTier1Owned[j] && owner.TryGetValue(rows[j].WireRowId, out var session))
+                {
+                    return session;
+                }
+            }
+        }
+        else
+        {
+            for (var j = index - 1; j >= 0; j--)
+            {
+                if (isTier1Owned[j] && owner.TryGetValue(rows[j].WireRowId, out var session))
+                {
+                    return session;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static bool TryParseIso(string? s, out DateTimeOffset result)
     {
+        // RoundtripKind preserves an explicit offset; AssumeUniversal keeps an offset-less string
+        // machine-independent (interpreted as UTC) so the function stays pure (no ambient timezone).
         if (s is not null &&
-            DateTimeOffset.TryParse(s, null, DateTimeStyles.RoundtripKind, out result))
+            DateTimeOffset.TryParse(
+                s,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
+                out result))
         {
             return true;
         }
