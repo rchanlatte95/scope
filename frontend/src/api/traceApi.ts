@@ -138,6 +138,17 @@ export interface TraceSession {
    * Added ST-01 (T-2026-06-15-16).
    */
   deleted_at?: string | null;
+  /**
+   * Scope-minted durable conversation id (schema v18, ST-09).
+   * Machine-aware: minted once per unique (machine_id, stem) binding; stable across /resume and
+   * /clear splits sharing the same stem. Two sessions on different machines with the same stem get
+   * DIFFERENT scope_conversation_id values.
+   * When present (non-null, non-empty), this is the PRIMARY grouping key for buildConversationGroups.
+   * Falls back to the (machine_id, conversation_id) composite for pre-v18 rows (null/empty).
+   * WhenWritingNull: omitted when null; arrives as `undefined`.
+   * Added ST-09 (durable-conversation-identity).
+   */
+  scope_conversation_id?: string | null;
 }
 
 // ---------------------------------------------------------------------------

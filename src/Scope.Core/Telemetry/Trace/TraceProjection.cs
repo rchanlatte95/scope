@@ -69,7 +69,12 @@ public static class TraceProjection
                 // conversation_id + machine_id (schema v16): resume-stable cross-machine conversation
                 // identity. Present when obs schema is v16+ (EnsureSchema-guarded); null otherwise.
                 ConversationId: Str(r, "conversation_id"),
-                MachineId: Str(r, "machine_id")));
+                MachineId: Str(r, "machine_id"),
+                // scope_conversation_id (schema v18, ST-09 additive): Scope-minted durable conversation id.
+                // Present when obs schema is v18+ (EnsureSchema-guarded); null when absent (pre-v18 db,
+                // non-CC hosts). Column omitted in the pre-v11/v12/v16 fallback catch path — Str() returns
+                // null safely when the key is absent from the row dictionary.
+                ScopeConversationId: Str(r, "scope_conversation_id")));
         }
         return result;
     }

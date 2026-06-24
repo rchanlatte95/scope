@@ -184,25 +184,30 @@ function conversationDisplayId(sessions: TraceSession[], conversationId: string)
 }
 
 /**
- * Groups CLI sessions by a machine-aware composite key derived from conversation_id
- * (resume-stable transcript filename stem), falling back to cc_session_id then s.id.
+ * Groups CLI sessions by conversation identity, using a three-tier keying strategy:
+ *
+ * Tier 1 (PRIMARY — ST-09): scope_conversation_id when non-null and non-empty.
+ *   This is the Scope-minted durable id (schema v18). It is already machine-aware
+ *   (minted per (machine_id, stem) binding), so no machine component is prepended.
+ *   The bucket key IS the scope_conversation_id; the emitted conversation_id is also
+ *   the scope_conversation_id (so convRowMap lookups work when the backend keys
+ *   by_conversation on scope_conversation_id).
+ *
+ * Tier 2 (FALLBACK — legacy/pre-v18): machine-aware (machine_id, conversation_id) composite.
+ *   Used when scope_conversation_id is absent (null/empty). conversation_id is the
+ *   transcript filename stem (stable across /resume). machine_id is prepended to the bucket
+ *   key for cross-machine isolation. The emitted conversation_id is the conv component ALONE
+ *   (not the composite) so convRowMap.get(conversation_id) matches BudgetConversationRow.
+ *
+ * Tier 3 (IDLESS SINGLETON): when both scope_conversation_id and conversation_id are absent,
+ *   falls back to cc_session_id (groups sessions sharing a host conversation), then to s.id
+ *   (unique singleton per session).
  *
  * Behaviour:
- * - conversation_id (if non-empty) is the primary grouping identity. It is stable
- *   across /resume (which assigns a new cc_session_id). Two sessions with the same
- *   conversation_id AND the same machine_id are ONE group (resume continuity).
- * - machine_id is included in the bucket key so that two different machines that
- *   happen to share the same conversation_id are kept in separate groups.
- * - Null/empty machine_id is treated as an empty sentinel: legacy/null-machine
- *   sessions with the same conversation_id still merge into ONE group.
- * - The emitted ConversationGroup.conversation_id field is the conversation component
- *   ALONE (not the composite), so convRowMap.get(conversation_id) still matches
- *   BudgetConversationRow.conversation_id from the backend by_conversation rollup.
- * - Sessions with a null/empty conversation_id fall back to cc_session_id (backward
- *   compat), then to s.id (idless singleton).
  * - Label is "Cron run" when ALL members are cron sessions; otherwise "Conversation".
  * - Groups are ordered by the first session's position in the input array (preserves
  *   server sort order for each conversation's lead session).
+ * - Null/empty machine_id in the legacy path -> empty sentinel so legacy rows merge.
  *
  * When byConversationRows is empty (older server without by_conversation), the function
  * still groups correctly (spend/counts will be null). Callers may check whether any
@@ -219,34 +224,43 @@ export function buildConversationGroups(
     convRowMap.set(row.conversation_id, row);
   }
 
-  // Group sessions by a machine-aware composite bucket key.
-  // convComponent = conversation_id ?? cc_session_id ?? s.id (backend fallback order).
-  // machineComponent = machine_id when non-empty, else '' (null/empty -> no-fragment sentinel).
-  // bucketKey = machineComponent + ' ' + convComponent (space cannot appear in uuid/hex ids).
-  // The emitted conversation_id is convComponent ALONE (for convRowMap lookup).
+  // Group sessions by a bucket key derived via the three-tier strategy above.
+  // bucketKey:     the key used for bucketing (unique per logical group)
+  // convComponent: the value emitted as ConversationGroup.conversation_id
+  //                (used for convRowMap lookup; must match BudgetConversationRow.conversation_id)
   const orderedBucketKeys: string[] = [];           // insertion-order bucket keys
   const buckets = new Map<string, TraceSession[]>();
   const bucketToConvComponent = new Map<string, string>(); // bucketKey -> convComponent
 
   for (const s of sessions) {
+    const scopeConvId = s.scope_conversation_id ?? null;
     const convId = s.conversation_id ?? null;
     const ccId = s.cc_session_id ?? null;
 
-    // Mirror backend fallback: conversation_id (if non-empty) else cc_session_id (if non-empty) else s.id.
-    const convComponent: string =
-      (convId !== null && convId !== '')
-        ? convId
-        : (ccId !== null && ccId !== '')
-          ? ccId
-          : s.id;
+    let bucketKey: string;
+    let convComponent: string;
 
-    // Null/empty machine_id -> empty sentinel so legacy rows don't fragment.
-    const machineComponent = s.machine_id ?? '';
-
-    // Idless singleton guard: when convComponent is s.id (fallback), every session gets
-    // a unique bucket regardless of machine_id (s.id is already unique per session).
-    // For non-singleton paths the composite key provides cross-machine isolation.
-    const bucketKey = `${machineComponent} ${convComponent}`;
+    if (scopeConvId !== null && scopeConvId !== '') {
+      // Tier 1 (PRIMARY — ST-09): scope_conversation_id is machine-aware; use it directly.
+      // The bucket key and the emitted conversation_id are both the scope_conversation_id.
+      bucketKey = scopeConvId;
+      convComponent = scopeConvId;
+    } else if (convId !== null && convId !== '') {
+      // Tier 2 (FALLBACK — pre-v18): machine-aware (machine_id, conversation_id) composite.
+      // Prepend machine_id to the bucket key for cross-machine isolation.
+      // Null/empty machine_id -> empty sentinel so legacy rows don't fragment.
+      const machineComponent = s.machine_id ?? '';
+      bucketKey = `${machineComponent} ${convId}`;
+      convComponent = convId;  // emitted alone (not composite) for convRowMap lookup
+    } else {
+      // Tier 3 (IDLESS): no scope_conversation_id, no conversation_id.
+      // Fall back to cc_session_id (groups sessions sharing a host conversation) else s.id.
+      const ccComponent = (ccId !== null && ccId !== '') ? ccId : s.id;
+      // For idless singleton (s.id fallback) each session gets a unique bucket (s.id is unique).
+      // For cc_session_id fallback the bucket may merge multiple sessions.
+      bucketKey = ccComponent;
+      convComponent = ccComponent;
+    }
 
     let bucket = buckets.get(bucketKey);
     if (bucket === undefined) {

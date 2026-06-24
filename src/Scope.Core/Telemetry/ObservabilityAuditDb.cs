@@ -191,10 +191,12 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         // The generation columns drive the base-launch rollup (Wave 2 / ST-06) and cc_session_id (v11)
         // drives the universal by_conversation grouping + the TraceSession.cc_session_id surface
         // (T-2026-06-19-04). conversation_id + machine_id (v16) drive resume-stable cross-machine
-        // conversation grouping. All are selected here so the per-session ledger batch and the
-        // sessions-list projection read them WITHOUT a second query. A pre-v11/v12/v16 db (EnsureSchema
-        // could not apply, e.g. a read-only connection) falls back to omitting all together (column-omitting catch).
-        var newCols = ", s.base_session_key, s.generation, s.cc_session_id, s.conversation_id, s.machine_id";
+        // conversation grouping. scope_conversation_id (v18, ST-09) is the Scope-minted durable id
+        // that the FE uses as its PRIMARY grouping key (falling back to (machine_id, conversation_id)
+        // when absent). All are selected here so the per-session ledger batch and the sessions-list
+        // projection read them WITHOUT a second query. A pre-v11/v12/v16/v18 db (EnsureSchema could
+        // not apply, e.g. a read-only connection) falls back to omitting all together (column-omitting catch).
+        var newCols = ", s.base_session_key, s.generation, s.cc_session_id, s.conversation_id, s.machine_id, s.scope_conversation_id";
         var (where, parms) = BuildSessionWindowFilter(since, from, to, includeDeleted);
 
         List<Dictionary<string, object?>> Run(string extraCols)
@@ -220,7 +222,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
 
         try { return Run(newCols); }
-        catch (SqliteException) { return Run(""); /* pre-v11/v12/v16 schema: no base_session_key/generation/cc_session_id/conversation_id/machine_id columns */ }
+        catch (SqliteException) { return Run(""); /* pre-v11/v12/v16/v18 schema: no base_session_key/generation/cc_session_id/conversation_id/machine_id/scope_conversation_id columns */ }
     }
 
     /// <summary>
