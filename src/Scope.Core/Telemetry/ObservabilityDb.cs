@@ -296,15 +296,21 @@ public class ObservabilityDb(SqliteConnection connection)
     /// <see cref="RecordToolCall"/> supplies a non-null value; SessionStart and UserSubmit pass null
     /// so they never freeze the id to a phantom transcript.
     /// </para>
+    /// <para>
+    /// <paramref name="scopeConversationId"/> (schema v18, ST-07) is the Scope-minted durable
+    /// conversation identity resolved by <c>ResolveScopeConversationId</c> in ObservabilityWriter.
+    /// SET-ONCE via COALESCE: the first non-null value wins and is never overwritten by a subsequent
+    /// call. Null when only machine_id or conversationId (stem) is missing; legacy rows stay NULL.
+    /// </para>
     /// </summary>
-    public void UpsertAgentSession(string sessionKey, string agentType, string agentSubtype, string? parentSessionKey = null, string? origin = null, string? ccSessionId = null, string? baseSessionKey = null, int? generation = null, string? conversationId = null, string? machineId = null)
+    public void UpsertAgentSession(string sessionKey, string agentType, string agentSubtype, string? parentSessionKey = null, string? origin = null, string? ccSessionId = null, string? baseSessionKey = null, int? generation = null, string? conversationId = null, string? machineId = null, string? scopeConversationId = null)
     {
         var now = DateTime.UtcNow.ToString("o");
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO obs_agent_sessions
-                (session_key, agent_type, agent_subtype, first_seen_at, last_seen_at, request_count, parent_session_key, origin, cc_session_id, base_session_key, generation, conversation_id, machine_id)
-            VALUES ($key, $type, $subtype, $now, $now, 1, $parentKey, $origin, $ccSessionId, $baseKey, $generation, $conversationId, $machineId)
+                (session_key, agent_type, agent_subtype, first_seen_at, last_seen_at, request_count, parent_session_key, origin, cc_session_id, base_session_key, generation, conversation_id, machine_id, scope_conversation_id)
+            VALUES ($key, $type, $subtype, $now, $now, 1, $parentKey, $origin, $ccSessionId, $baseKey, $generation, $conversationId, $machineId, $scopeConvId)
             ON CONFLICT(session_key) DO UPDATE SET
                 agent_subtype = $subtype,
                 last_seen_at = $now,
@@ -315,7 +321,8 @@ public class ObservabilityDb(SqliteConnection connection)
                 base_session_key = COALESCE(obs_agent_sessions.base_session_key, $baseKey),
                 generation = COALESCE(obs_agent_sessions.generation, $generation),
                 conversation_id = COALESCE($conversationId, obs_agent_sessions.conversation_id),
-                machine_id = COALESCE(obs_agent_sessions.machine_id, $machineId);
+                machine_id = COALESCE(obs_agent_sessions.machine_id, $machineId),
+                scope_conversation_id = COALESCE(obs_agent_sessions.scope_conversation_id, $scopeConvId);
             """;
         cmd.Parameters.AddWithValue("$key", sessionKey);
         cmd.Parameters.AddWithValue("$type", agentType);
@@ -328,6 +335,146 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$generation", (object?)generation ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$conversationId", (object?)conversationId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$machineId", (object?)machineId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$scopeConvId", (object?)scopeConversationId ?? DBNull.Value);
+        cmd.ExecuteNonQueryRetrying();
+    }
+
+    /// <summary>
+    /// Inserts a row into <c>obs_conversations</c> (the durable conversation root).
+    /// Called by <c>ObservabilityWriter.ResolveScopeConversationId</c> inside a BEGIN IMMEDIATE
+    /// transaction; the caller must supply the pre-minted id and an open transaction.
+    /// </summary>
+    public void InsertConversation(string scopeConversationId, string machineId, string createdAt, SqliteTransaction txn)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = txn;
+        cmd.CommandText = """
+            INSERT INTO obs_conversations (scope_conversation_id, machine_id, created_at)
+            VALUES ($id, $machine, $createdAt);
+            """;
+        cmd.Parameters.AddWithValue("$id", scopeConversationId);
+        cmd.Parameters.AddWithValue("$machine", machineId);
+        cmd.Parameters.AddWithValue("$createdAt", createdAt);
+        cmd.ExecuteNonQueryRetrying();
+    }
+
+    /// <summary>
+    /// Inserts a row into <c>obs_conversation_bindings</c> binding (machine_id, stem) ->
+    /// scope_conversation_id. Called inside a BEGIN IMMEDIATE transaction; first-insert-wins on the
+    /// PRIMARY KEY (machine_id, stem) — a concurrent inserter will cause a PK SqliteException which
+    /// the caller catches and re-SELECTs.
+    /// </summary>
+    public void InsertConversationBinding(string machineId, string stem, string scopeConversationId, string boundAt, SqliteTransaction txn)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = txn;
+        cmd.CommandText = """
+            INSERT INTO obs_conversation_bindings (machine_id, stem, scope_conversation_id, bound_at)
+            VALUES ($machine, $stem, $conv, $boundAt);
+            """;
+        cmd.Parameters.AddWithValue("$machine", machineId);
+        cmd.Parameters.AddWithValue("$stem", stem);
+        cmd.Parameters.AddWithValue("$conv", scopeConversationId);
+        cmd.Parameters.AddWithValue("$boundAt", boundAt);
+        cmd.ExecuteNonQueryRetrying();
+    }
+
+    /// <summary>
+    /// Looks up an existing binding for (machine_id, stem) from <c>obs_conversation_bindings</c>.
+    /// Returns the bound scope_conversation_id, or null when no binding exists.
+    /// May be called inside or outside a transaction (txn may be null for reads outside a txn).
+    /// </summary>
+    public string? SelectConversationBinding(string machineId, string stem, SqliteTransaction? txn)
+    {
+        using var cmd = connection.CreateCommand();
+        if (txn != null) cmd.Transaction = txn;
+        cmd.CommandText = """
+            SELECT scope_conversation_id FROM obs_conversation_bindings
+            WHERE machine_id = $machine AND stem = $stem LIMIT 1;
+            """;
+        cmd.Parameters.AddWithValue("$machine", machineId);
+        cmd.Parameters.AddWithValue("$stem", stem);
+        return cmd.ExecuteScalarRetrying() as string;
+    }
+
+    /// <summary>
+    /// Repoints all <c>obs_conversation_bindings</c> rows whose <c>scope_conversation_id</c> equals
+    /// <paramref name="fromId"/> to <paramref name="toId"/>, and updates the matching
+    /// <c>obs_agent_sessions.scope_conversation_id</c> pointer. Called by
+    /// <c>ObservabilityWriter.RelinkConversation</c> inside a transaction.
+    /// <para>
+    /// The orphaned <c>obs_conversations</c> row for <paramref name="fromId"/> is intentionally left
+    /// in place: it is a historical record of the original mint event and does not consume significant
+    /// storage. Downstream reads GROUP BY <c>obs_conversation_bindings.scope_conversation_id</c>
+    /// (the live pointer), so the orphaned row is invisible to rollups.
+    /// </para>
+    /// </summary>
+    public void RelinkConversationPointers(string fromId, string toId, SqliteTransaction txn)
+    {
+        using var bindCmd = connection.CreateCommand();
+        bindCmd.Transaction = txn;
+        bindCmd.CommandText = """
+            UPDATE obs_conversation_bindings
+            SET scope_conversation_id = $toId
+            WHERE scope_conversation_id = $fromId;
+            """;
+        bindCmd.Parameters.AddWithValue("$toId", toId);
+        bindCmd.Parameters.AddWithValue("$fromId", fromId);
+        bindCmd.ExecuteNonQueryRetrying();
+
+        using var sessCmd = connection.CreateCommand();
+        sessCmd.Transaction = txn;
+        sessCmd.CommandText = """
+            UPDATE obs_agent_sessions
+            SET scope_conversation_id = $toId
+            WHERE scope_conversation_id = $fromId;
+            """;
+        sessCmd.Parameters.AddWithValue("$toId", toId);
+        sessCmd.Parameters.AddWithValue("$fromId", fromId);
+        sessCmd.ExecuteNonQueryRetrying();
+    }
+
+    /// <summary>
+    /// Backfills <c>obs_agent_sessions.scope_conversation_id</c> for sessions that have a non-null
+    /// <c>conversation_id</c> AND non-null <c>machine_id</c> but a null <c>scope_conversation_id</c>.
+    /// Returns the distinct (machine_id, conversation_id) pairs that need a scope_conversation_id
+    /// resolved so the caller can mint/lookup each one and then apply the UPDATE.
+    /// </summary>
+    public IReadOnlyList<(string MachineId, string ConversationId)> SelectSessionsNeedingConversationBackfill()
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT machine_id, conversation_id
+            FROM obs_agent_sessions
+            WHERE conversation_id IS NOT NULL
+              AND machine_id IS NOT NULL
+              AND scope_conversation_id IS NULL;
+            """;
+        var results = new List<(string, string)>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add((reader.GetString(0), reader.GetString(1)));
+        return results;
+    }
+
+    /// <summary>
+    /// Sets <c>scope_conversation_id</c> on all sessions sharing the given (machine_id, conversation_id)
+    /// pair that currently have a null pointer. Idempotent: sessions already carrying a non-null
+    /// scope_conversation_id are left unchanged by the WHERE clause.
+    /// </summary>
+    public void ApplyConversationBackfill(string machineId, string conversationId, string scopeConversationId)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE obs_agent_sessions
+            SET scope_conversation_id = $scopeConvId
+            WHERE machine_id = $machine
+              AND conversation_id = $convId
+              AND scope_conversation_id IS NULL;
+            """;
+        cmd.Parameters.AddWithValue("$scopeConvId", scopeConversationId);
+        cmd.Parameters.AddWithValue("$machine", machineId);
+        cmd.Parameters.AddWithValue("$convId", conversationId);
         cmd.ExecuteNonQueryRetrying();
     }
 
