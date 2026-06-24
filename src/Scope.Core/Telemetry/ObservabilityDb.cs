@@ -333,6 +333,9 @@ public class ObservabilityDb(SqliteConnection connection)
 
     /// <summary>
     /// Inserts an agent lifecycle event.
+    /// Populates <c>tool_use_id</c> (schema v17) by extracting it from <paramref name="eventDataJson"/>
+    /// via <see cref="ObservabilityAuditDb.ParseEventToolUseId"/> so the column is always written
+    /// without requiring callers to re-parse the JSON.
     /// </summary>
     public void InsertAgentEvent(
         string sessionKey,
@@ -340,17 +343,19 @@ public class ObservabilityDb(SqliteConnection connection)
         string eventType,
         string? eventDataJson)
     {
+        var toolUseId = ObservabilityAuditDb.ParseEventToolUseId(eventDataJson);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO obs_agent_events
-                (id, session_key, request_id, event_type, event_data_json, created_at)
-            VALUES ($id, $session, $requestId, $eventType, $eventData, $createdAt);
+                (id, session_key, request_id, event_type, event_data_json, tool_use_id, created_at)
+            VALUES ($id, $session, $requestId, $eventType, $eventData, $toolUseId, $createdAt);
             """;
         cmd.Parameters.AddWithValue("$id", Guid.GetGuid7String());
         cmd.Parameters.AddWithValue("$session", sessionKey);
         cmd.Parameters.AddWithValue("$requestId", (object?)requestId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$eventType", eventType);
         cmd.Parameters.AddWithValue("$eventData", (object?)eventDataJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$toolUseId", (object?)toolUseId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
         cmd.ExecuteNonQueryRetrying();
     }
@@ -469,6 +474,8 @@ public class ObservabilityDb(SqliteConnection connection)
     /// Same as <see cref="InsertAgentEvent"/> but includes the <c>span_id</c> column and the optional
     /// tool-call <paramref name="status"/> column (schema v14, OBS-12): the heuristic outcome
     /// ("success"/"failed") for tool_call events, NULL for every other event type or when undeterminable.
+    /// Also populates <c>tool_use_id</c> (schema v17) extracted from <paramref name="eventDataJson"/>
+    /// via <see cref="ObservabilityAuditDb.ParseEventToolUseId"/> so callers never re-parse the JSON.
     /// </summary>
     public void InsertAgentEventWithSpan(
         string sessionKey,
@@ -478,11 +485,12 @@ public class ObservabilityDb(SqliteConnection connection)
         string? spanId,
         string? status = null)
     {
+        var toolUseId = ObservabilityAuditDb.ParseEventToolUseId(eventDataJson);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO obs_agent_events
-                (id, session_key, request_id, event_type, event_data_json, span_id, status, created_at)
-            VALUES ($id, $session, $requestId, $eventType, $eventData, $spanId, $status, $createdAt);
+                (id, session_key, request_id, event_type, event_data_json, span_id, status, tool_use_id, created_at)
+            VALUES ($id, $session, $requestId, $eventType, $eventData, $spanId, $status, $toolUseId, $createdAt);
             """;
         cmd.Parameters.AddWithValue("$id", Guid.GetGuid7String());
         cmd.Parameters.AddWithValue("$session", sessionKey);
@@ -491,6 +499,7 @@ public class ObservabilityDb(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$eventData", (object?)eventDataJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$spanId", (object?)spanId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$toolUseId", (object?)toolUseId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("o"));
         cmd.ExecuteNonQueryRetrying();
     }
