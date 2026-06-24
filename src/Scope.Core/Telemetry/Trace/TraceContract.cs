@@ -43,6 +43,9 @@ public static class TraceSchema
     public const string KindExport = "export";
     public const string KindTopActions = "top_actions";
     public const string KindWire = "wire";
+    // ST-08: two-axis rollup kinds.
+    public const string KindConversationRollup = "conversation_rollup";
+    public const string KindCliSessionRollup = "cli_session_rollup";
 }
 
 // ---------------------------------------------------------------------------
@@ -605,5 +608,68 @@ public sealed record SessionsListBodyWithLimits(
     [property: JsonPropertyName("sessions")] List<TraceSession> Sessions,
     [property: JsonPropertyName("limits")] ObservabilityLimitsDto Limits,
     [property: JsonPropertyName("total_count")] long TotalCount = 0);
+
+// ---------------------------------------------------------------------------
+// Conversation rollup (kind=conversation_rollup) -- ST-08, additive.
+// Token-exact per-session + remainder partition; cost reported as unknown
+// (no per-row obs_cost_estimates join at this layer).
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// One session's token slice from a conversation rollup, or the remainder bucket
+/// (session_key="" for remainder). Token counts are exact from wire_calls rows.
+/// <para>
+/// <c>value_usd</c> is the priced cost for this slice (ST-08): for a session slice it is the session's
+/// own per-session RollupBody cost (reconciling with the per-session trace screen by construction); for
+/// the remainder it is the per-row-by-model priced cost of the unowned wire rows. Null when no price
+/// could be applied (unknown model / no pricing). The conversation invariant holds at the cost level:
+/// conversation total value_usd == sum(session value_usd) + remainder value_usd.
+/// </para>
+/// </summary>
+public sealed record ConversationSessionSlice(
+    [property: JsonPropertyName("session_key")] string SessionKey,
+    [property: JsonPropertyName("input_tokens")] long InputTokens,
+    [property: JsonPropertyName("output_tokens")] long OutputTokens,
+    [property: JsonPropertyName("cache_creation_tokens")] long CacheCreationTokens,
+    [property: JsonPropertyName("cache_read_tokens")] long CacheReadTokens,
+    [property: JsonPropertyName("total_tokens")] long TotalTokens,
+    [property: JsonPropertyName("row_count")] int RowCount,
+    [property: JsonPropertyName("value_usd")] decimal? ValueUsd);
+
+/// <summary>
+/// Body for kind=conversation_rollup (ST-08). Sessions + remainder + totals.
+/// Invariant by construction: total_tokens == sum(session.total_tokens) + remainder.total_tokens,
+/// and total_value_usd == sum(session.value_usd) + remainder.value_usd (exact decimal).
+/// </summary>
+public sealed record ConversationRollupBody(
+    [property: JsonPropertyName("scope_conversation_id")] string ScopeConversationId,
+    [property: JsonPropertyName("sessions")] List<ConversationSessionSlice> Sessions,
+    [property: JsonPropertyName("remainder")] ConversationSessionSlice Remainder,
+    [property: JsonPropertyName("total_input_tokens")] long TotalInputTokens,
+    [property: JsonPropertyName("total_output_tokens")] long TotalOutputTokens,
+    [property: JsonPropertyName("total_tokens")] long TotalTokens,
+    [property: JsonPropertyName("total_value_usd")] decimal? TotalValueUsd);
+
+/// <summary>
+/// One base-session row in a CLI-session rollup: total tokens and cost across all generation-suffixed
+/// sessions sharing this base_session_key. Token counts are exact from wire_calls rows; <c>value_usd</c>
+/// is the sum of each session's per-session RollupBody cost (ST-08).
+/// </summary>
+public sealed record CliSessionRollupRow(
+    [property: JsonPropertyName("base_session_key")] string BaseSessionKey,
+    [property: JsonPropertyName("session_count")] int SessionCount,
+    [property: JsonPropertyName("input_tokens")] long InputTokens,
+    [property: JsonPropertyName("output_tokens")] long OutputTokens,
+    [property: JsonPropertyName("cache_creation_tokens")] long CacheCreationTokens,
+    [property: JsonPropertyName("cache_read_tokens")] long CacheReadTokens,
+    [property: JsonPropertyName("total_tokens")] long TotalTokens,
+    [property: JsonPropertyName("token_source")] string TokenSource,
+    [property: JsonPropertyName("value_usd")] decimal? ValueUsd);
+
+/// <summary>
+/// Body for kind=cli_session_rollup (ST-08). Per-base-session cost summary.
+/// </summary>
+public sealed record CliSessionRollupBody(
+    [property: JsonPropertyName("rows")] List<CliSessionRollupRow> Rows);
 
 #pragma warning restore MA0016

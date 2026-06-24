@@ -552,4 +552,181 @@ public sealed class TraceDocuments(ObservabilityAuditDb db, TraceIdentity identi
         return TraceJson.Serialize(Wrap(TraceSchema.KindWire,
             IsPacket(tier) ? TraceSchema.TierPacket : TraceSchema.TierLocalFull, body, null));
     }
+
+    // -----------------------------------------------------------------------
+    // conversation_rollup (ST-08, additive)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds and serializes the conversation-level rollup envelope for <paramref name="scopeConversationId"/>.
+    /// Partitions transcript and proxy wire rows across all sessions bound to this conversation, with an
+    /// honest remainder bucket for unattributed rows (R2/R3).
+    /// <para>
+    /// COST (ST-08, CRITICAL-2): the headline is COST, not tokens. The conversation cost is built as
+    /// the SUM of per-session priced costs PLUS a priced remainder, so it reconciles with the per-session
+    /// trace screen BY CONSTRUCTION:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>Each session slice's <c>value_usd</c> = that session's own <see cref="RollupBody"/>
+    ///         <c>Totals.Cost.ValueUsd</c> (the exact same number <c>/api/trace/rollup</c> serves).</item>
+    ///   <item>The remainder's <c>value_usd</c> = the unowned wire rows priced per-row by model (cache
+    ///         buckets price differently, so cost is not derivable from summed token scalars).</item>
+    ///   <item><c>total_value_usd</c> = Σ(session value_usd) + remainder value_usd (exact decimal).</item>
+    /// </list>
+    /// An absent obs/wire schema yields an empty but coherent response, never a throw.
+    /// </summary>
+    public string ConversationRollup(string scopeConversationId, string tier)
+    {
+        var data = HasData ? db.ComputeConversationRollup(scopeConversationId) : null;
+
+        List<ConversationSessionSlice> sessions;
+        ConversationSessionSlice remainder;
+        long totalInput, totalOutput, totalTokens;
+        decimal? totalValueUsd;
+
+        if (data == null || data.SessionSlices.Count == 0)
+        {
+            sessions = [];
+            remainder = new ConversationSessionSlice("", 0, 0, 0, 0, 0, 0, null);
+            totalInput = 0;
+            totalOutput = 0;
+            totalTokens = 0;
+            totalValueUsd = null;
+        }
+        else
+        {
+            // Per-session priced cost: each session's own RollupBody total cost (reconciles with the
+            // per-session trace screen). Sum is the conversation's owned (non-remainder) cost.
+            decimal sessionCostSum = 0m;
+            var anySessionCost = false;
+            sessions = data.SessionSlices
+                .Select(s =>
+                {
+                    decimal? sessionCost = null;
+                    var rb = RollupBody(s.SessionKey);
+                    sessionCost = rb.Totals.Cost.ValueUsd;
+                    if (sessionCost.HasValue) { sessionCostSum += sessionCost.Value; anySessionCost = true; }
+                    return new ConversationSessionSlice(
+                        s.SessionKey,
+                        s.InputTokens,
+                        s.OutputTokens,
+                        s.CacheCreationTokens,
+                        s.CacheReadTokens,
+                        TotalTokens: s.InputTokens + s.OutputTokens + s.CacheCreationTokens + s.CacheReadTokens,
+                        s.RowCount,
+                        ValueUsd: sessionCost);
+                })
+                .ToList();
+
+            // Remainder priced per-row by model (the conversation-level remainder cost, R3).
+            var remainderCost = PriceRemainderRows(data.RemainderRows);
+
+            remainder = new ConversationSessionSlice(
+                "",
+                data.Remainder.InputTokens,
+                data.Remainder.OutputTokens,
+                data.Remainder.CacheCreationTokens,
+                data.Remainder.CacheReadTokens,
+                TotalTokens: data.Remainder.InputTokens + data.Remainder.OutputTokens + data.Remainder.CacheCreationTokens + data.Remainder.CacheReadTokens,
+                data.Remainder.RowCount,
+                ValueUsd: remainderCost);
+
+            totalInput = data.TotalInputTokens;
+            totalOutput = data.TotalOutputTokens;
+            totalTokens = data.TotalInputTokens + data.TotalOutputTokens + data.TotalCacheCreationTokens + data.TotalCacheReadTokens;
+
+            // conversation total cost = Σ(session) + remainder. Null only when NOTHING priced.
+            if (anySessionCost || remainderCost.HasValue)
+                totalValueUsd = (anySessionCost ? sessionCostSum : 0m) + (remainderCost ?? 0m);
+            else
+                totalValueUsd = null;
+        }
+
+        var body = new ConversationRollupBody(
+            scopeConversationId, sessions, remainder, totalInput, totalOutput, totalTokens, totalValueUsd);
+        return TraceJson.Serialize(Wrap(TraceSchema.KindConversationRollup,
+            IsPacket(tier) ? TraceSchema.TierPacket : TraceSchema.TierLocalFull, body, null));
+    }
+
+    /// <summary>
+    /// Prices a list of conversation-remainder wire rows per-row by model, using the SAME pricing path
+    /// (<see cref="ModelIdNormalizer"/> + <see cref="CostPricing.ComputeBucketCost"/>) as the rollup's
+    /// provider_estimated fallback. Each row's (input, output, cache_creation, cache_read) bucket is
+    /// priced against its own model's rate; cache-create and cache-read are priced at different rates,
+    /// which is exactly why a token-only remainder cannot be priced. A row whose model does not resolve
+    /// to a rate contributes nothing (honest: no invented price). Returns null when NO row priced (so an
+    /// all-unknown remainder reports cost null, not a misleading $0).
+    /// </summary>
+    private decimal? PriceRemainderRows(IReadOnlyList<RemainderWireRow> rows)
+    {
+        if (rows.Count == 0) return null;
+        decimal sum = 0m;
+        var anyPriced = false;
+        foreach (var r in rows)
+        {
+            var rate = ModelIdNormalizer.Lookup(r.Model, estimationPricing);
+            if (rate is null) continue;
+            var cost = CostPricing.ComputeBucketCost(
+                r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, rate);
+            if (cost > 0) { sum += cost; anyPriced = true; }
+        }
+        return anyPriced ? sum : null;
+    }
+
+    // -----------------------------------------------------------------------
+    // cli_session_rollup (ST-08, additive)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds and serializes the CLI-session rollup envelope for <paramref name="baseSessionKey"/>.
+    /// Groups all sessions whose <c>base_session_key</c> equals the given key, then computes wire
+    /// token totals for each. Returns a single-row summary. An absent obs/wire schema returns an
+    /// empty but coherent response, never a throw.
+    /// </summary>
+    public string CliSessionRollup(string baseSessionKey, string tier)
+    {
+        var rows = new List<CliSessionRollupRow>();
+
+        if (HasData)
+        {
+            var sessionKeys = db.GetSessionKeysByBaseSessionKey(baseSessionKey);
+            if (sessionKeys.Count > 0)
+            {
+                long totalInput = 0, totalOutput = 0, totalCacheCreate = 0, totalCacheRead = 0;
+                // Cost (ST-08): sum each session's own RollupBody cost (the SAME number the per-session
+                // trace screen shows), so the CLI-session cost is the sum of those screens by construction.
+                decimal costSum = 0m;
+                var anyCost = false;
+
+                // For each session, get wire token totals + cost via the existing rollup path.
+                // We reuse GetFullTrace-based rollup: tokens from obs_agent_spans (exact) or
+                // fallback from wire rows as computed by TraceRollup.
+                foreach (var sk in sessionKeys)
+                {
+                    var rbody = RollupBody(sk);
+                    totalInput += rbody.Totals.Tokens.Input ?? 0;
+                    totalOutput += rbody.Totals.Tokens.Output ?? 0;
+                    totalCacheCreate += rbody.Totals.Tokens.CacheCreation ?? 0;
+                    totalCacheRead += rbody.Totals.Tokens.CacheRead ?? 0;
+                    if (rbody.Totals.Cost.ValueUsd is { } c) { costSum += c; anyCost = true; }
+                }
+
+                var totalTokens = totalInput + totalOutput + totalCacheCreate + totalCacheRead;
+                rows.Add(new CliSessionRollupRow(
+                    BaseSessionKey: baseSessionKey,
+                    SessionCount: sessionKeys.Count,
+                    InputTokens: totalInput,
+                    OutputTokens: totalOutput,
+                    CacheCreationTokens: totalCacheCreate,
+                    CacheReadTokens: totalCacheRead,
+                    TotalTokens: totalTokens,
+                    TokenSource: "rollup",
+                    ValueUsd: anyCost ? costSum : null));
+            }
+        }
+
+        var body = new CliSessionRollupBody(rows);
+        return TraceJson.Serialize(Wrap(TraceSchema.KindCliSessionRollup,
+            IsPacket(tier) ? TraceSchema.TierPacket : TraceSchema.TierLocalFull, body, null));
+    }
 }

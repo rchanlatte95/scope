@@ -1755,20 +1755,33 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         // row therefore attributes to the generation whose cc_session_id matches its wire header, not
         // dumped onto the first generation. ResolveCcSessionId self-ensures the obs schema (the v12
         // reader-gap guard), so this SELECT never 500s on a lazily-migrated live db.
-        var ccSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
+        // proxyCcSessionIds: the EXACT-cc candidate set used ONLY by the non-transcript (proxy) branch.
+        //   - the Scope session key itself (for a host-provided session this IS Claude Code's session id);
+        //   - the D3 bridge value (obs_agent_sessions.cc_session_id), this generation's own host cc id.
+        // It deliberately EXCLUDES the conversation_id stem (see the ST-08 note below).
+        var proxyCcSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
         var bridged = ResolveCcSessionId(scopeSessionKey);
-        if (!string.IsNullOrEmpty(bridged)) ccSessionIds.Add(bridged);
-        // The conversation_id (resume-stable transcript stem) is a THIRD candidate for NON-transcript
-        // (proxy/wire) rows: on /resume the host cc_session_id changes but the stem does not, so a proxy
-        // row keyed on the stem must still attribute to this session. We add it to ccSessionIds, which is
-        // consulted ONLY by the non-transcript branch of the main loop below.
-        //
-        // ST-04 scope-correction: this conversation_id candidate is NOT used to attribute TRANSCRIPT rows.
-        // Transcript rows (source='transcript') are routed by the conversation-global assignment + the
-        // single-session fast-path below, BEFORE the ccSessionIds non-transcript branch is reached, so the
-        // stem never broad-matches a sibling session's transcript turn (the original duplication defect).
-        var convIdForCandidate = ResolveConversationId(scopeSessionKey);
-        if (!string.IsNullOrEmpty(convIdForCandidate)) ccSessionIds.Add(convIdForCandidate);
+        if (!string.IsNullOrEmpty(bridged)) proxyCcSessionIds.Add(bridged);
+
+        // transcriptCcSessionIds: the candidate set used ONLY by the single-session transcript fast-path
+        // (LoadTranscriptWireRowIdsForCcSet). It INCLUDES the resume-stable conversation_id stem, because a
+        // single-session conversation's transcript turns are keyed on the stem (and/or the session's own cc
+        // id). Including the stem here is SAFE: the fast-path only runs when |S| == 1, so there is no sibling
+        // to cross-attribute to; with |S| >= 2 transcript routing goes through the conversation-global
+        // assignment instead, which never consults this set.
+        var transcriptCcSessionIds = new HashSet<string>(proxyCcSessionIds, StringComparer.Ordinal);
+        var convIdForTranscript = ResolveConversationId(scopeSessionKey);
+        if (!string.IsNullOrEmpty(convIdForTranscript)) transcriptCcSessionIds.Add(convIdForTranscript);
+
+        // ST-08 (proxy single-owner reconciliation): the conversation_id stem is DELIBERATELY NOT a
+        // candidate for non-transcript (proxy) rows. A first-generation proxy row is keyed on
+        // cc_session_id == the stem (gen-0's host cc id IS the stem), so it already matches its OWNING
+        // session via proxyCcSessionIds (scopeSessionKey or the bridged cc) without the stem broad-match.
+        // Adding the stem to the proxy set let EVERY resumed sibling (each sharing the same stem) ALSO
+        // claim that one gen-0 proxy row, over-counting it once per sibling and diverging from the
+        // conversation rollup's exact-cc single-owner attribution. Keeping the stem out of the proxy set
+        // makes proxy attribution SINGLE-OWNER everywhere, so the per-session trace and the conversation
+        // rollup agree (a gen-0 proxy row belongs to gen-0, never to a resumed sibling).
 
         // Map each span's agent_ref (host sub-agent id) to its span id for per-subagent binding.
         // agent_ref is a schema-v5 column; read it via a dedicated tolerant query (NOT in the main
@@ -1836,7 +1849,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 // owner or a bounding event window). This restores the pre-ST-04 single-session behavior
                 // (transcript rows attributed by cc_session_id) without re-introducing the cross-session
                 // broad-match that caused the duplication defect (that only applies when |S| >= 2).
-                ownedTranscriptWireIds = LoadTranscriptWireRowIdsForCcSet(ccSessionIds);
+                ownedTranscriptWireIds = LoadTranscriptWireRowIdsForCcSet(transcriptCcSessionIds);
             }
             else
             {
@@ -1908,10 +1921,11 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 continue;
             }
 
-            // Non-transcript rows: keep existing cc_session_id / cc_agent_id behavior.
+            // Non-transcript rows: exact cc_session_id / cc_agent_id binding (single-owner: NO stem
+            // broad-match, so a gen-0 proxy row never bleeds onto a resumed sibling — ST-08).
             var ccSession = Get(w, "cc_session_id");
             if (string.Equals(ccSession, "-", StringComparison.Ordinal) || ccSession.Length == 0) continue; // header-less row
-            if (!ccSessionIds.Contains(ccSession)) continue; // belongs to a different session
+            if (!proxyCcSessionIds.Contains(ccSession)) continue; // belongs to a different session
 
             // Per-subagent binding: cc_agent_id -> a span's agent_ref. Otherwise the parent's own spend
             // (including text-only turns) anchors on the session root span.
@@ -2946,6 +2960,432 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
         catch (SqliteException) { /* schema too old / no source column: degrade to empty */ }
         return result;
+    }
+
+    // =========================================================================
+    // ST-08: Conversation rollup core. Multi-stem union load + owner assignment
+    // + additive per-session / remainder buckets.
+    // =========================================================================
+
+    /// <summary>
+    /// Loads <c>source='transcript'</c> wire_calls rows for MULTIPLE stems (union), ordered by
+    /// <c>started_at ASC</c> (transcript order). Deduplicates rows by id (first-occurrence-wins).
+    /// This is the multi-stem version of <see cref="LoadTranscriptRows(string)"/>, required by R1
+    /// (stems = union of obs_conversation_bindings stems + each session's own conversation_id).
+    /// <para>
+    /// Reader-gap: self-ensures both the obs schema and wire schema before reading. Degrades to an
+    /// empty list on any schema/IO error. Empty stems returns empty.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<TranscriptWireRow> LoadTranscriptRowsForStems(IReadOnlyList<string> stems)
+    {
+        if (stems.Count == 0) return [];
+
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+        if (!HasWireCallsTable()) return [];
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var rows = new List<TranscriptWireRow>();
+
+        const int batchSize = 50;
+        for (var i = 0; i < stems.Count; i += batchSize)
+        {
+            var batch = stems.Skip(i).Take(Math.Min(batchSize, stems.Count - i)).ToList();
+            try
+            {
+                using var cmd = connection.CreateCommand();
+                var paramNames = new List<string>(batch.Count);
+                for (var j = 0; j < batch.Count; j++)
+                {
+                    var p = $"$s{j}";
+                    paramNames.Add(p);
+                    cmd.Parameters.AddWithValue(p, batch[j]);
+                }
+                cmd.CommandText =
+                    "SELECT id, tool_use_ids, started_at, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cc_session_id "
+                    + "FROM wire_calls WHERE source = 'transcript' AND cc_session_id IN ("
+                    + string.Join(", ", paramNames) + ") ORDER BY started_at ASC;";
+
+                using var reader = cmd.ExecuteReaderRetrying();
+                while (reader.Read())
+                {
+                    var id = reader.GetString(0);
+                    if (!seen.Add(id)) continue; // dedup across stems
+                    var toolUseIdsRaw = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    var startedAt = reader.GetString(2);
+                    var inputTokens = reader.IsDBNull(3) ? 0L : reader.GetInt64(3);
+                    var outputTokens = reader.IsDBNull(4) ? 0L : reader.GetInt64(4);
+                    var cacheCreationTokens = reader.IsDBNull(5) ? 0L : reader.GetInt64(5);
+                    var cacheReadTokens = reader.IsDBNull(6) ? 0L : reader.GetInt64(6);
+                    var model = reader.IsDBNull(7) ? null : reader.GetString(7);
+                    var ccSessionId = reader.IsDBNull(8) ? null : reader.GetString(8);
+                    var toolUseIds = ParseWireToolUseIds(toolUseIdsRaw ?? "");
+                    rows.Add(new TranscriptWireRow(id, toolUseIds, startedAt, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, ccSessionId));
+                }
+            }
+            catch (SqliteException) { /* schema too old or missing columns; skip batch */ }
+        }
+
+        // Global sort by started_at ASC after merging batches (batches may interleave across stems).
+        rows.Sort((a, b) => string.CompareOrdinal(a.StartedAt, b.StartedAt));
+        return rows;
+    }
+
+    /// <summary>
+    /// Loads non-transcript (<c>source != 'transcript'</c>) wire_calls rows whose <c>cc_session_id</c>
+    /// is in <paramref name="ccSessionIds"/>. Used by <see cref="ComputeConversationRollup"/> to
+    /// collect proxy-metered rows for owner assignment (R5: each proxy row gets exactly one owner
+    /// via exact cc_session_id match).
+    /// <para>
+    /// Reader-gap: self-ensures the wire schema. Degrades to empty on any schema/IO error.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<ProxyWireRow> LoadProxyWireRowsForConversation(IReadOnlyCollection<string> ccSessionIds)
+    {
+        if (ccSessionIds.Count == 0) return [];
+        if (!HasWireCallsTable()) return [];
+
+        var rows = new List<ProxyWireRow>();
+        var ids = ccSessionIds.ToList();
+        const int batchSize = 50;
+        for (var i = 0; i < ids.Count; i += batchSize)
+        {
+            var batch = ids.Skip(i).Take(Math.Min(batchSize, ids.Count - i)).ToList();
+            try
+            {
+                using var cmd = connection.CreateCommand();
+                var paramNames = new List<string>(batch.Count);
+                for (var j = 0; j < batch.Count; j++)
+                {
+                    var p = $"$c{j}";
+                    paramNames.Add(p);
+                    cmd.Parameters.AddWithValue(p, batch[j]);
+                }
+                cmd.CommandText =
+                    "SELECT id, started_at, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cc_session_id "
+                    + "FROM wire_calls WHERE source != 'transcript' AND cc_session_id IN ("
+                    + string.Join(", ", paramNames) + ") ORDER BY started_at ASC;";
+
+                using var reader = cmd.ExecuteReaderRetrying();
+                while (reader.Read())
+                {
+                    var id = reader.GetString(0);
+                    var startedAt = reader.GetString(1);
+                    var inputTokens = reader.IsDBNull(2) ? 0L : reader.GetInt64(2);
+                    var outputTokens = reader.IsDBNull(3) ? 0L : reader.GetInt64(3);
+                    var cacheCreationTokens = reader.IsDBNull(4) ? 0L : reader.GetInt64(4);
+                    var cacheReadTokens = reader.IsDBNull(5) ? 0L : reader.GetInt64(5);
+                    var model = reader.IsDBNull(6) ? null : reader.GetString(6);
+                    var ccSessionId = reader.IsDBNull(7) ? null : reader.GetString(7);
+                    rows.Add(new ProxyWireRow(id, startedAt, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, ccSessionId));
+                }
+            }
+            catch (SqliteException) { /* schema too old; skip batch */ }
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Returns the set of conversation stems bound to <paramref name="scopeConversationId"/> in
+    /// <c>obs_conversation_bindings</c>, plus the set of session infos (session_key, cc_session_id,
+    /// conversation_id) from <c>obs_agent_sessions</c> that reference this scope_conversation_id, plus
+    /// the conversation's machine id.
+    /// <para>
+    /// <c>MachineId</c> is the single machine the conversation is bound to: a scope_conversation_id is
+    /// minted per (machine_id, conversation) so all its sessions agree on one machine. When the sessions
+    /// agree on one non-empty machine_id, that machine is returned; if they disagree or none is recorded,
+    /// the empty string is returned (the attributor then treats every transcript row as machine "",
+    /// matching owners/windows that are also empty — i.e. it still partitions correctly within one
+    /// machine-less conversation). This is the feed the transcript attributor's machine-equality gate
+    /// requires (without it, every transcript row falls to remainder).
+    /// </para>
+    /// <para>
+    /// Used by <see cref="ComputeConversationRollup"/> to build the R1 multi-stem union.
+    /// Reader-gap: self-ensures the obs schema. Degrades gracefully on missing tables/columns.
+    /// </para>
+    /// </summary>
+    public (IReadOnlySet<string> Stems, IReadOnlyList<ConversationSessionInfo> Sessions, string MachineId)
+        GetConversationStemsAndSessions(string scopeConversationId)
+    {
+        var stems = new HashSet<string>(StringComparer.Ordinal);
+        var sessions = new List<ConversationSessionInfo>();
+
+        if (string.IsNullOrEmpty(scopeConversationId))
+            return (stems, sessions, "");
+
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+
+        // Load stems from obs_conversation_bindings.
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT stem FROM obs_conversation_bindings WHERE scope_conversation_id = $scid;";
+            cmd.Parameters.AddWithValue("$scid", scopeConversationId);
+            using var reader = cmd.ExecuteReaderRetrying();
+            while (reader.Read())
+            {
+                var stem = reader.IsDBNull(0) ? null : reader.GetString(0);
+                if (!string.IsNullOrEmpty(stem)) stems.Add(stem);
+            }
+        }
+        catch (SqliteException) { /* table absent on pre-v18 db; stems stay empty */ }
+
+        // Load sessions from obs_agent_sessions, and resolve the conversation's agreeing machine id.
+        // The machine is single per scope_conversation_id (minted per machine); we take it only when all
+        // non-empty session machine_ids agree, mirroring LoadTranscriptRows's resolution discipline.
+        string? agreedMachine = null;
+        var machineAgrees = true;
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT session_key, cc_session_id, conversation_id, machine_id
+                FROM obs_agent_sessions
+                WHERE scope_conversation_id = $scid;
+                """;
+            cmd.Parameters.AddWithValue("$scid", scopeConversationId);
+            using var reader = cmd.ExecuteReaderRetrying();
+            while (reader.Read())
+            {
+                var sessionKey = reader.GetString(0);
+                var ccSessionId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var convId = reader.IsDBNull(2) ? null : reader.GetString(2);
+                var machineId = reader.IsDBNull(3) ? null : reader.GetString(3);
+                sessions.Add(new ConversationSessionInfo(sessionKey, ccSessionId, convId));
+                // Also collect conversation_id as a stem (R1).
+                if (!string.IsNullOrEmpty(convId)) stems.Add(convId);
+                // Track machine agreement across non-empty session machine ids.
+                if (!string.IsNullOrEmpty(machineId))
+                {
+                    if (agreedMachine == null) agreedMachine = machineId;
+                    else if (!string.Equals(agreedMachine, machineId, StringComparison.Ordinal)) machineAgrees = false;
+                }
+            }
+        }
+        catch (SqliteException) { /* pre-v18 db; sessions list stays empty */ }
+
+        var conversationMachine = (machineAgrees && agreedMachine != null) ? agreedMachine : "";
+        return (stems, sessions, conversationMachine);
+    }
+
+    /// <summary>
+    /// Core conversation-level rollup computation (ST-08).
+    /// <para>
+    /// Algorithm:
+    /// <list type="number">
+    ///   <item>Collect all sessions bound to <paramref name="scopeConversationId"/>.</item>
+    ///   <item>Build stems = union of obs_conversation_bindings stems + each session's conversation_id (R1).</item>
+    ///   <item>Load transcript wire rows for ALL stems (multi-stem union).</item>
+    ///   <item>Load proxy wire rows whose cc_session_id matches any session's cc_session_id or stem (R5).</item>
+    ///   <item>Assign transcript rows per session via <see cref="TranscriptRowAttributor.Assign"/> when |S| &gt;= 2,
+    ///         or fast-path all to the single session when |S| == 1.</item>
+    ///   <item>Assign each proxy row to exactly one session by exact cc_session_id match (R5).</item>
+    ///   <item>Sum tokens per session slice; remainder = unassigned rows.</item>
+    /// </list>
+    /// </para>
+    /// Never throws; degrades gracefully when obs/wire schema is absent.
+    /// </summary>
+    public ConversationRollupData ComputeConversationRollup(string scopeConversationId)
+    {
+        var empty = new ConversationRollupData(
+            scopeConversationId, [], [], new SessionCostSlice("", 0, 0, 0, 0, 0), [], 0, 0, 0, 0);
+
+        if (string.IsNullOrEmpty(scopeConversationId)) return empty;
+
+        var (stems, sessions, conversationMachineId) = GetConversationStemsAndSessions(scopeConversationId);
+        if (sessions.Count == 0) return empty;
+
+        // All stems: from bindings + each session's conversation_id (already added in GetConversationStemsAndSessions).
+        var allStems = new List<string>(stems);
+
+        // Load transcript rows for all stems (R1 multi-stem union).
+        var transcriptRows = LoadTranscriptRowsForStems(allStems);
+
+        // Build proxy row lookup: cc_session_ids = union of session.CcSessionId + session.ConversationId + stems.
+        // (R5: proxy rows are owned by exact cc_session_id match against a session's cc_session_id.)
+        var proxyCcSet = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var s in sessions)
+        {
+            if (!string.IsNullOrEmpty(s.CcSessionId)) proxyCcSet.Add(s.CcSessionId);
+            if (!string.IsNullOrEmpty(s.ConversationId)) proxyCcSet.Add(s.ConversationId);
+        }
+        foreach (var stem in stems) proxyCcSet.Add(stem);
+
+        var proxyRows = LoadProxyWireRowsForConversation(proxyCcSet);
+
+        // Build cc_session_id -> session_key map for proxy row attribution (R5, exact match only).
+        var ccToSession = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var s in sessions)
+        {
+            if (!string.IsNullOrEmpty(s.CcSessionId))
+                ccToSession.TryAdd(s.CcSessionId, s.SessionKey);
+        }
+
+        // Per-session accumulators.
+        var sessionTokens = new Dictionary<string, (long Input, long Output, long CacheCreate, long CacheRead, int Rows)>(StringComparer.Ordinal);
+        foreach (var s in sessions)
+            sessionTokens[s.SessionKey] = (0, 0, 0, 0, 0);
+
+        long remInput = 0, remOutput = 0, remCacheCreate = 0, remCacheRead = 0;
+        var remRows = 0;
+        // Remainder wire rows carry per-row model so the document layer can PRICE the remainder per
+        // model (cache buckets price differently). Cost is NOT derivable from summed token scalars (R3).
+        var remainderRows = new List<RemainderWireRow>();
+
+        // Transcript attribution.
+        var sessionKeys = sessions.Select(s => s.SessionKey).ToList();
+        if (sessions.Count == 1)
+        {
+            // Fast-path: all transcript rows owned by the single session.
+            var sk = sessions[0].SessionKey;
+            foreach (var row in transcriptRows)
+            {
+                var (inp, outp, cc, cr, rowCount) = sessionTokens[sk];
+                sessionTokens[sk] = (inp + row.InputTokens, outp + row.OutputTokens,
+                    cc + row.CacheCreationTokens, cr + row.CacheReadTokens, rowCount + 1);
+            }
+        }
+        else
+        {
+            // Multi-session: use TranscriptRowAttributor.Assign (Tier-1 tool_use_id, Tier-2 time window).
+            // CRITICAL: stamp each attributor row with the conversation's resolved machine id. The
+            // attributor gates BOTH tiers on machine equality against the owner/window machine ids
+            // (which come from obs_agent_sessions.machine_id); feeding "" here while owners/windows
+            // carry a real machine id makes every comparison fail and dumps EVERY row to remainder
+            // (no per-session attribution at all). conversationMachineId IS that session machine.
+            var attributorRows = transcriptRows
+                .Select(r => new TranscriptRow(r.Id, r.ToolUseIds, r.StartedAt, conversationMachineId))
+                .ToList();
+            var ownerMap = BuildToolUseOwnerMap(sessionKeys);
+            var windows = BuildSessionWindows(sessionKeys);
+            var assignment = TranscriptRowAttributor.Assign(attributorRows, ownerMap, windows);
+
+            // Map wire row id -> TranscriptWireRow for token lookup.
+            var rowById = transcriptRows.ToDictionary(r => r.Id, StringComparer.Ordinal);
+
+            foreach (var (rowId, sessionKey) in assignment.OwnerByWireRowId)
+            {
+                if (!rowById.TryGetValue(rowId, out var row)) continue;
+                if (!sessionTokens.TryGetValue(sessionKey, out var acc)) continue;
+                sessionTokens[sessionKey] = (acc.Input + row.InputTokens, acc.Output + row.OutputTokens,
+                    acc.CacheCreate + row.CacheCreationTokens, acc.CacheRead + row.CacheReadTokens, acc.Rows + 1);
+            }
+
+            // Remainder transcript rows (R2: stay in remainder, never re-owned).
+            foreach (var rowId in assignment.RemainderRowIds)
+            {
+                if (!rowById.TryGetValue(rowId, out var row)) continue;
+                remInput += row.InputTokens;
+                remOutput += row.OutputTokens;
+                remCacheCreate += row.CacheCreationTokens;
+                remCacheRead += row.CacheReadTokens;
+                remRows++;
+                remainderRows.Add(new RemainderWireRow(
+                    row.Id, row.Model, row.InputTokens, row.OutputTokens, row.CacheCreationTokens, row.CacheReadTokens));
+            }
+        }
+
+        // Proxy row attribution (R5: exact cc_session_id -> session_key; unmatched -> remainder).
+        foreach (var row in proxyRows)
+        {
+            var proxyOwned = false;
+            if (!string.IsNullOrEmpty(row.CcSessionId) && ccToSession.TryGetValue(row.CcSessionId, out var proxySk)
+                && sessionTokens.TryGetValue(proxySk, out var proxyAcc))
+            {
+                sessionTokens[proxySk] = (proxyAcc.Input + row.InputTokens, proxyAcc.Output + row.OutputTokens,
+                    proxyAcc.CacheCreate + row.CacheCreationTokens, proxyAcc.CacheRead + row.CacheReadTokens, proxyAcc.Rows + 1);
+                proxyOwned = true;
+            }
+            if (!proxyOwned)
+            {
+                remInput += row.InputTokens;
+                remOutput += row.OutputTokens;
+                remCacheCreate += row.CacheCreationTokens;
+                remCacheRead += row.CacheReadTokens;
+                remRows++;
+                remainderRows.Add(new RemainderWireRow(
+                    row.Id, row.Model, row.InputTokens, row.OutputTokens, row.CacheCreationTokens, row.CacheReadTokens));
+            }
+        }
+
+        // Build session slices.
+        var slices = new List<SessionCostSlice>(sessions.Count);
+        long totalInput = 0, totalOutput = 0, totalCacheCreate = 0, totalCacheRead = 0;
+        foreach (var s in sessions)
+        {
+            var (inp, outp, cc, cr, cnt) = sessionTokens[s.SessionKey];
+            slices.Add(new SessionCostSlice(s.SessionKey, inp, outp, cc, cr, cnt));
+            totalInput += inp;
+            totalOutput += outp;
+            totalCacheCreate += cc;
+            totalCacheRead += cr;
+        }
+
+        var remainder = new SessionCostSlice("", remInput, remOutput, remCacheCreate, remCacheRead, remRows);
+        totalInput += remInput;
+        totalOutput += remOutput;
+        totalCacheCreate += remCacheCreate;
+        totalCacheRead += remCacheRead;
+
+        return new ConversationRollupData(
+            scopeConversationId, sessionKeys, slices, remainder, remainderRows,
+            totalInput, totalOutput, totalCacheCreate, totalCacheRead);
+    }
+
+    // =========================================================================
+    // ST-08: CLI-session rollup by base_session_key.
+    // =========================================================================
+
+    /// <summary>
+    /// Returns all sessions whose <c>base_session_key</c> column equals <paramref name="baseSessionKey"/>.
+    /// Used by the CLI-session rollup to group all generation-suffixed sessions under one base key.
+    /// Reader-gap: self-ensures the obs schema. Returns empty on any error.
+    /// </summary>
+    public IReadOnlyList<string> GetSessionKeysByBaseSessionKey(string baseSessionKey)
+    {
+        if (string.IsNullOrEmpty(baseSessionKey)) return [];
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+
+        var result = new List<string>();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT session_key FROM obs_agent_sessions
+                WHERE base_session_key = $bsk;
+                """;
+            cmd.Parameters.AddWithValue("$bsk", baseSessionKey);
+            using var reader = cmd.ExecuteReaderRetrying();
+            while (reader.Read())
+            {
+                var sk = reader.IsDBNull(0) ? null : reader.GetString(0);
+                if (!string.IsNullOrEmpty(sk)) result.Add(sk);
+            }
+        }
+        catch (SqliteException) { /* pre-v18 db or missing base_session_key column */ }
+
+        // If no results found (pre-v18 db without base_session_key), fall back to the session itself
+        // if it exists — but only return empty; the endpoint will handle the 404 case.
+        return result;
+    }
+
+    /// <summary>
+    /// Checks whether a <c>base_session_key</c> column exists in <c>obs_agent_sessions</c>.
+    /// Used to determine if the base_session_key grouping is available.
+    /// </summary>
+    internal bool HasBaseSessionKeyColumn()
+    {
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT base_session_key FROM obs_agent_sessions LIMIT 0;";
+            cmd.ExecuteNonQuery();
+            return true;
+        }
+        catch (SqliteException) { return false; }
     }
 }
 
