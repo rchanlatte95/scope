@@ -192,7 +192,14 @@ public sealed record TraceSession(
     // Locally-minted stable machine id (schema v16). Source = obs_agent_sessions.machine_id. Enables
     // correct cross-machine merge by distinguishing rows captured on different machines. null on legacy
     // rows and non-capturing hosts. Additive at the end so positional construction elsewhere is unaffected.
-    [property: JsonPropertyName("machine_id")] string? MachineId = null);
+    [property: JsonPropertyName("machine_id")] string? MachineId = null,
+    // Scope-owned durable conversation id (schema v18, ST-06/ST-07). Minted once per unique
+    // (machine_id, stem) binding; stable across /resume and /clear splits that share the same stem.
+    // Two sessions on different machines with the same stem get DIFFERENT scope_conversation_id values
+    // (machine-aware). null on legacy rows (pre-v18 db), non-CC hosts, or when the resolver has not
+    // yet assigned one. Additive at the end. ST-09: surfaced here so the FE can key grouping on it
+    // instead of the (machine_id, conversation_id) composite, closing the cross-machine keying gap.
+    [property: JsonPropertyName("scope_conversation_id")] string? ScopeConversationId = null);
 
 /// <summary>Body for kind=sessions_list.</summary>
 public sealed record SessionsListBody(
