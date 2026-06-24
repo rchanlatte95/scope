@@ -724,6 +724,62 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
         catch (SqliteException) { /* best-effort backfill; forward writes always populate */ }
 
         InsertSchemaVersion(17, "tool_use_id first-class column + index on obs_agent_events (T-2026-06-23-01 ST-01; backfilled from event_data_json)");
+        MigrateToV18();
+    }
+
+    private void MigrateToV18()
+    {
+        // Durable conversation identity (T-2026-06-23-01 ST-06): Scope-minted conversation id
+        // that is stable across /resume (unlike the host cc session id which changes) and
+        // cross-machine-safe (bucketed by machine_id so two machines never share a
+        // scope_conversation_id even if their stems collide).
+        //
+        // obs_agent_sessions.scope_conversation_id: points each session row at the logical
+        // conversation it belongs to. Nullable, additive, set-once (populated by ST-07 resolver).
+        // idx_obssess_scopeconv: index for fast per-conversation session lookups.
+        //
+        // obs_conversations: one row per scope_conversation_id; records the machine it originated
+        // on and when it was first created (minted by the ST-07 resolver on first sight of a stem).
+        //
+        // obs_conversation_bindings: the stem -> scope_conversation_id mapping. PRIMARY KEY on
+        // (machine_id, stem) enforces first-insert-wins: only ONE scope_conversation_id is ever
+        // bound to a (machine, stem) pair; a duplicate INSERT must fail (PK collision). The ST-07
+        // resolver catches that collision and re-SELECTs the winner (copy BindGeneration pattern).
+        //
+        // ALTER TABLE lacks IF NOT EXISTS before SQLite 3.35, wrap in try/catch.
+        try
+        {
+            using var alterCmd = connection.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE obs_agent_sessions ADD COLUMN scope_conversation_id TEXT;";
+            alterCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { /* column already exists */ }
+
+        try
+        {
+            using var idxCmd = connection.CreateCommand();
+            idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_obssess_scopeconv ON obs_agent_sessions(scope_conversation_id);";
+            idxCmd.ExecuteNonQueryRetrying();
+        }
+        catch (SqliteException) { }
+
+        using var tablesCmd = connection.CreateCommand();
+        tablesCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS obs_conversations (
+                scope_conversation_id TEXT PRIMARY KEY,
+                machine_id            TEXT NOT NULL,
+                created_at            TEXT NOT NULL);
+
+            CREATE TABLE IF NOT EXISTS obs_conversation_bindings (
+                machine_id            TEXT NOT NULL,
+                stem                  TEXT NOT NULL,
+                scope_conversation_id TEXT NOT NULL,
+                bound_at              TEXT NOT NULL,
+                PRIMARY KEY (machine_id, stem));
+            """;
+        tablesCmd.ExecuteNonQueryRetrying();
+
+        InsertSchemaVersion(18, "scope_conversation_id column + index on obs_agent_sessions; obs_conversations + obs_conversation_bindings tables (T-2026-06-23-01 ST-06)");
     }
 
     private void InsertSchemaVersion(int version, string description)
