@@ -1758,11 +1758,17 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         var ccSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
         var bridged = ResolveCcSessionId(scopeSessionKey);
         if (!string.IsNullOrEmpty(bridged)) ccSessionIds.Add(bridged);
-        // NOTE: We deliberately do NOT add conversation_id to ccSessionIds for transcript rows any
-        // more (ST-04). Transcript rows are now attributed via the conversation-global assignment below,
-        // which is scoped to the exact owning session. The conversation_id broad-match is the source of
-        // the per-session duplication defect and is removed here. Non-transcript rows still use ccSessionIds
-        // as the filter set (their cc_session_id == the session-specific value, not the transcript stem).
+        // The conversation_id (resume-stable transcript stem) is a THIRD candidate for NON-transcript
+        // (proxy/wire) rows: on /resume the host cc_session_id changes but the stem does not, so a proxy
+        // row keyed on the stem must still attribute to this session. We add it to ccSessionIds, which is
+        // consulted ONLY by the non-transcript branch of the main loop below.
+        //
+        // ST-04 scope-correction: this conversation_id candidate is NOT used to attribute TRANSCRIPT rows.
+        // Transcript rows (source='transcript') are routed by the conversation-global assignment + the
+        // single-session fast-path below, BEFORE the ccSessionIds non-transcript branch is reached, so the
+        // stem never broad-matches a sibling session's transcript turn (the original duplication defect).
+        var convIdForCandidate = ResolveConversationId(scopeSessionKey);
+        if (!string.IsNullOrEmpty(convIdForCandidate)) ccSessionIds.Add(convIdForCandidate);
 
         // Map each span's agent_ref (host sub-agent id) to its span id for per-subagent binding.
         // agent_ref is a schema-v5 column; read it via a dedicated tolerant query (NOT in the main
@@ -1800,7 +1806,6 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         // extra DB queries on non-interactive / cron sessions.
         TranscriptOwnerAssignment? transcriptAssignment = null;
         HashSet<string>? ownedTranscriptWireIds = null; // wire row ids owned by this session
-        HashSet<string>? transcriptWireIds = null; // all transcript wire row ids (for the source filter below)
 
         // Check whether any unconsumed transcript rows exist before computing the assignment.
         var hasUnconsumedTranscript = false;
@@ -1816,30 +1821,43 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
         if (hasUnconsumedTranscript)
         {
-            // Resolve S: all session keys sharing this session's conversation.
+            // Resolve S: all session keys sharing this session's conversation (same machine).
             var conversationSessionKeys = ResolveConversationSessionKeys(scopeSessionKey);
 
-            // Load conversation-level inputs for the attributor.
-            var toolUseOwners = BuildToolUseOwnerMap(conversationSessionKeys);
-            var sessionWindows = BuildSessionWindows(conversationSessionKeys);
-            var convId = ResolveConversationId(scopeSessionKey);
-            var transcriptRows = string.IsNullOrEmpty(convId) ? [] : LoadTranscriptRows(convId);
-
-            // Run the pure attributor: CONVERSATION-GLOBAL, one pass for all sibling sessions.
-            transcriptAssignment = TranscriptRowAttributor.Assign(transcriptRows, toolUseOwners, sessionWindows);
-
-            // Owned by THIS session (X): rows where the assignment says X is the owner.
-            ownedTranscriptWireIds = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var (wireRowId, ownerSessionKey) in transcriptAssignment.OwnerByWireRowId)
+            if (conversationSessionKeys.Count <= 1)
             {
-                if (string.Equals(ownerSessionKey, scopeSessionKey, StringComparison.Ordinal))
-                    ownedTranscriptWireIds.Add(wireRowId);
+                // ---- Single-session fast-path (|S| == 1) ----
+                // When this session is the ONLY session in its conversation, there is no ambiguity to
+                // resolve: EVERY transcript wire row belonging to this session (matched by its own
+                // cc-id candidate set — the cc_session_id and/or the resume-stable stem) is owned by it.
+                // This bypasses the Tier-1/Tier-2 window machinery, whose sole purpose is to disambiguate
+                // ownership among >=2 sessions. It is provably non-duplicating (one session owns all rows)
+                // and provably loss-free (no transcript row falls to remainder for lack of a tool_use_id
+                // owner or a bounding event window). This restores the pre-ST-04 single-session behavior
+                // (transcript rows attributed by cc_session_id) without re-introducing the cross-session
+                // broad-match that caused the duplication defect (that only applies when |S| >= 2).
+                ownedTranscriptWireIds = LoadTranscriptWireRowIdsForCcSet(ccSessionIds);
             }
+            else
+            {
+                // ---- Multi-session: conversation-global disambiguation (|S| >= 2) ----
+                // Load conversation-level inputs for the attributor.
+                var toolUseOwners = BuildToolUseOwnerMap(conversationSessionKeys);
+                var sessionWindows = BuildSessionWindows(conversationSessionKeys);
+                var convId = ResolveConversationId(scopeSessionKey);
+                var transcriptRows = string.IsNullOrEmpty(convId) ? [] : LoadTranscriptRows(convId);
 
-            // All transcript wire row ids (to distinguish them in the main loop below).
-            transcriptWireIds = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var r in transcriptRows)
-                transcriptWireIds.Add(r.WireRowId);
+                // Run the pure attributor: CONVERSATION-GLOBAL, one pass for all sibling sessions.
+                transcriptAssignment = TranscriptRowAttributor.Assign(transcriptRows, toolUseOwners, sessionWindows);
+
+                // Owned by THIS session (X): rows where the assignment says X is the owner.
+                ownedTranscriptWireIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var (wireRowId, ownerSessionKey) in transcriptAssignment.OwnerByWireRowId)
+                {
+                    if (string.Equals(ownerSessionKey, scopeSessionKey, StringComparison.Ordinal))
+                        ownedTranscriptWireIds.Add(wireRowId);
+                }
+            }
         }
 
         // Build a map of tool_use_id -> span id for the transcript row anchor step. When a transcript
@@ -2880,6 +2898,54 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
         catch (SqliteException) { /* schema too old; degrade to empty */ }
         return rows;
+    }
+
+    /// <summary>
+    /// Returns the wire-row ids of every <c>source='transcript'</c> row whose <c>cc_session_id</c> is in
+    /// <paramref name="ccSessionIds"/>. Used by the single-session fast-path in the header pass: when a
+    /// conversation has exactly one session, that session owns ALL of its transcript rows (those keyed on
+    /// its own cc_session_id or its resume-stable stem), with no Tier-1/Tier-2 disambiguation and no
+    /// remainder. This deliberately matches on cc_session_id (not conversation_id), so it works even for
+    /// sessions that have no stored <c>conversation_id</c> linkage (e.g. host-provided sessions and
+    /// per-generation rows whose transcript turns are keyed on their own cc id).
+    /// <para>
+    /// Reader-gap: self-ensures both schemas so a lazily-migrated live db does not 500 on the
+    /// <c>source</c> column. Degrades to an empty set on any schema/IO error (never crashes callers).
+    /// </para>
+    /// </summary>
+    private HashSet<string> LoadTranscriptWireRowIdsForCcSet(HashSet<string> ccSessionIds)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (ccSessionIds.Count == 0) return result;
+
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+        if (!HasWireCallsTable()) return result;
+
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            // Parameterize the IN-list explicitly (no string interpolation of values).
+            var paramNames = new List<string>(ccSessionIds.Count);
+            var i = 0;
+            foreach (var cc in ccSessionIds)
+            {
+                var p = "$cc" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                paramNames.Add(p);
+                cmd.Parameters.AddWithValue(p, cc);
+                i++;
+            }
+
+            cmd.CommandText =
+                "SELECT id FROM wire_calls WHERE source = 'transcript' AND cc_session_id IN ("
+                + string.Join(", ", paramNames) + ");";
+
+            using var reader = cmd.ExecuteReaderRetrying();
+            while (reader.Read())
+                result.Add(reader.GetString(0));
+        }
+        catch (SqliteException) { /* schema too old / no source column: degrade to empty */ }
+        return result;
     }
 }
 
