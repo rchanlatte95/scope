@@ -1755,20 +1755,33 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         // row therefore attributes to the generation whose cc_session_id matches its wire header, not
         // dumped onto the first generation. ResolveCcSessionId self-ensures the obs schema (the v12
         // reader-gap guard), so this SELECT never 500s on a lazily-migrated live db.
-        var ccSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
+        // proxyCcSessionIds: the EXACT-cc candidate set used ONLY by the non-transcript (proxy) branch.
+        //   - the Scope session key itself (for a host-provided session this IS Claude Code's session id);
+        //   - the D3 bridge value (obs_agent_sessions.cc_session_id), this generation's own host cc id.
+        // It deliberately EXCLUDES the conversation_id stem (see the ST-08 note below).
+        var proxyCcSessionIds = new HashSet<string>(StringComparer.Ordinal) { scopeSessionKey };
         var bridged = ResolveCcSessionId(scopeSessionKey);
-        if (!string.IsNullOrEmpty(bridged)) ccSessionIds.Add(bridged);
-        // The conversation_id (resume-stable transcript stem) is a THIRD candidate for NON-transcript
-        // (proxy/wire) rows: on /resume the host cc_session_id changes but the stem does not, so a proxy
-        // row keyed on the stem must still attribute to this session. We add it to ccSessionIds, which is
-        // consulted ONLY by the non-transcript branch of the main loop below.
-        //
-        // ST-04 scope-correction: this conversation_id candidate is NOT used to attribute TRANSCRIPT rows.
-        // Transcript rows (source='transcript') are routed by the conversation-global assignment + the
-        // single-session fast-path below, BEFORE the ccSessionIds non-transcript branch is reached, so the
-        // stem never broad-matches a sibling session's transcript turn (the original duplication defect).
-        var convIdForCandidate = ResolveConversationId(scopeSessionKey);
-        if (!string.IsNullOrEmpty(convIdForCandidate)) ccSessionIds.Add(convIdForCandidate);
+        if (!string.IsNullOrEmpty(bridged)) proxyCcSessionIds.Add(bridged);
+
+        // transcriptCcSessionIds: the candidate set used ONLY by the single-session transcript fast-path
+        // (LoadTranscriptWireRowIdsForCcSet). It INCLUDES the resume-stable conversation_id stem, because a
+        // single-session conversation's transcript turns are keyed on the stem (and/or the session's own cc
+        // id). Including the stem here is SAFE: the fast-path only runs when |S| == 1, so there is no sibling
+        // to cross-attribute to; with |S| >= 2 transcript routing goes through the conversation-global
+        // assignment instead, which never consults this set.
+        var transcriptCcSessionIds = new HashSet<string>(proxyCcSessionIds, StringComparer.Ordinal);
+        var convIdForTranscript = ResolveConversationId(scopeSessionKey);
+        if (!string.IsNullOrEmpty(convIdForTranscript)) transcriptCcSessionIds.Add(convIdForTranscript);
+
+        // ST-08 (proxy single-owner reconciliation): the conversation_id stem is DELIBERATELY NOT a
+        // candidate for non-transcript (proxy) rows. A first-generation proxy row is keyed on
+        // cc_session_id == the stem (gen-0's host cc id IS the stem), so it already matches its OWNING
+        // session via proxyCcSessionIds (scopeSessionKey or the bridged cc) without the stem broad-match.
+        // Adding the stem to the proxy set let EVERY resumed sibling (each sharing the same stem) ALSO
+        // claim that one gen-0 proxy row, over-counting it once per sibling and diverging from the
+        // conversation rollup's exact-cc single-owner attribution. Keeping the stem out of the proxy set
+        // makes proxy attribution SINGLE-OWNER everywhere, so the per-session trace and the conversation
+        // rollup agree (a gen-0 proxy row belongs to gen-0, never to a resumed sibling).
 
         // Map each span's agent_ref (host sub-agent id) to its span id for per-subagent binding.
         // agent_ref is a schema-v5 column; read it via a dedicated tolerant query (NOT in the main
@@ -1836,7 +1849,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 // owner or a bounding event window). This restores the pre-ST-04 single-session behavior
                 // (transcript rows attributed by cc_session_id) without re-introducing the cross-session
                 // broad-match that caused the duplication defect (that only applies when |S| >= 2).
-                ownedTranscriptWireIds = LoadTranscriptWireRowIdsForCcSet(ccSessionIds);
+                ownedTranscriptWireIds = LoadTranscriptWireRowIdsForCcSet(transcriptCcSessionIds);
             }
             else
             {
@@ -1908,10 +1921,11 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 continue;
             }
 
-            // Non-transcript rows: keep existing cc_session_id / cc_agent_id behavior.
+            // Non-transcript rows: exact cc_session_id / cc_agent_id binding (single-owner: NO stem
+            // broad-match, so a gen-0 proxy row never bleeds onto a resumed sibling — ST-08).
             var ccSession = Get(w, "cc_session_id");
             if (string.Equals(ccSession, "-", StringComparison.Ordinal) || ccSession.Length == 0) continue; // header-less row
-            if (!ccSessionIds.Contains(ccSession)) continue; // belongs to a different session
+            if (!proxyCcSessionIds.Contains(ccSession)) continue; // belongs to a different session
 
             // Per-subagent binding: cc_agent_id -> a span's agent_ref. Otherwise the parent's own spend
             // (including text-only turns) anchors on the session root span.
@@ -3075,20 +3089,30 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     /// <summary>
     /// Returns the set of conversation stems bound to <paramref name="scopeConversationId"/> in
     /// <c>obs_conversation_bindings</c>, plus the set of session infos (session_key, cc_session_id,
-    /// conversation_id) from <c>obs_agent_sessions</c> that reference this scope_conversation_id.
+    /// conversation_id) from <c>obs_agent_sessions</c> that reference this scope_conversation_id, plus
+    /// the conversation's machine id.
+    /// <para>
+    /// <c>MachineId</c> is the single machine the conversation is bound to: a scope_conversation_id is
+    /// minted per (machine_id, conversation) so all its sessions agree on one machine. When the sessions
+    /// agree on one non-empty machine_id, that machine is returned; if they disagree or none is recorded,
+    /// the empty string is returned (the attributor then treats every transcript row as machine "",
+    /// matching owners/windows that are also empty — i.e. it still partitions correctly within one
+    /// machine-less conversation). This is the feed the transcript attributor's machine-equality gate
+    /// requires (without it, every transcript row falls to remainder).
+    /// </para>
     /// <para>
     /// Used by <see cref="ComputeConversationRollup"/> to build the R1 multi-stem union.
     /// Reader-gap: self-ensures the obs schema. Degrades gracefully on missing tables/columns.
     /// </para>
     /// </summary>
-    public (IReadOnlySet<string> Stems, IReadOnlyList<ConversationSessionInfo> Sessions)
+    public (IReadOnlySet<string> Stems, IReadOnlyList<ConversationSessionInfo> Sessions, string MachineId)
         GetConversationStemsAndSessions(string scopeConversationId)
     {
         var stems = new HashSet<string>(StringComparer.Ordinal);
         var sessions = new List<ConversationSessionInfo>();
 
         if (string.IsNullOrEmpty(scopeConversationId))
-            return (stems, sessions);
+            return (stems, sessions, "");
 
         try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
         catch (SqliteException) { /* best-effort */ }
@@ -3108,12 +3132,16 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         }
         catch (SqliteException) { /* table absent on pre-v18 db; stems stay empty */ }
 
-        // Load sessions from obs_agent_sessions.
+        // Load sessions from obs_agent_sessions, and resolve the conversation's agreeing machine id.
+        // The machine is single per scope_conversation_id (minted per machine); we take it only when all
+        // non-empty session machine_ids agree, mirroring LoadTranscriptRows's resolution discipline.
+        string? agreedMachine = null;
+        var machineAgrees = true;
         try
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT session_key, cc_session_id, conversation_id
+                SELECT session_key, cc_session_id, conversation_id, machine_id
                 FROM obs_agent_sessions
                 WHERE scope_conversation_id = $scid;
                 """;
@@ -3124,14 +3152,22 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 var sessionKey = reader.GetString(0);
                 var ccSessionId = reader.IsDBNull(1) ? null : reader.GetString(1);
                 var convId = reader.IsDBNull(2) ? null : reader.GetString(2);
+                var machineId = reader.IsDBNull(3) ? null : reader.GetString(3);
                 sessions.Add(new ConversationSessionInfo(sessionKey, ccSessionId, convId));
                 // Also collect conversation_id as a stem (R1).
                 if (!string.IsNullOrEmpty(convId)) stems.Add(convId);
+                // Track machine agreement across non-empty session machine ids.
+                if (!string.IsNullOrEmpty(machineId))
+                {
+                    if (agreedMachine == null) agreedMachine = machineId;
+                    else if (!string.Equals(agreedMachine, machineId, StringComparison.Ordinal)) machineAgrees = false;
+                }
             }
         }
         catch (SqliteException) { /* pre-v18 db; sessions list stays empty */ }
 
-        return (stems, sessions);
+        var conversationMachine = (machineAgrees && agreedMachine != null) ? agreedMachine : "";
+        return (stems, sessions, conversationMachine);
     }
 
     /// <summary>
@@ -3154,11 +3190,11 @@ public class ObservabilityAuditDb(SqliteConnection connection)
     public ConversationRollupData ComputeConversationRollup(string scopeConversationId)
     {
         var empty = new ConversationRollupData(
-            scopeConversationId, [], new SessionCostSlice("", 0, 0, 0, 0, 0), 0, 0, 0, 0);
+            scopeConversationId, [], [], new SessionCostSlice("", 0, 0, 0, 0, 0), [], 0, 0, 0, 0);
 
         if (string.IsNullOrEmpty(scopeConversationId)) return empty;
 
-        var (stems, sessions) = GetConversationStemsAndSessions(scopeConversationId);
+        var (stems, sessions, conversationMachineId) = GetConversationStemsAndSessions(scopeConversationId);
         if (sessions.Count == 0) return empty;
 
         // All stems: from bindings + each session's conversation_id (already added in GetConversationStemsAndSessions).
@@ -3194,6 +3230,9 @@ public class ObservabilityAuditDb(SqliteConnection connection)
 
         long remInput = 0, remOutput = 0, remCacheCreate = 0, remCacheRead = 0;
         var remRows = 0;
+        // Remainder wire rows carry per-row model so the document layer can PRICE the remainder per
+        // model (cache buckets price differently). Cost is NOT derivable from summed token scalars (R3).
+        var remainderRows = new List<RemainderWireRow>();
 
         // Transcript attribution.
         var sessionKeys = sessions.Select(s => s.SessionKey).ToList();
@@ -3211,8 +3250,13 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         else
         {
             // Multi-session: use TranscriptRowAttributor.Assign (Tier-1 tool_use_id, Tier-2 time window).
+            // CRITICAL: stamp each attributor row with the conversation's resolved machine id. The
+            // attributor gates BOTH tiers on machine equality against the owner/window machine ids
+            // (which come from obs_agent_sessions.machine_id); feeding "" here while owners/windows
+            // carry a real machine id makes every comparison fail and dumps EVERY row to remainder
+            // (no per-session attribution at all). conversationMachineId IS that session machine.
             var attributorRows = transcriptRows
-                .Select(r => new TranscriptRow(r.Id, r.ToolUseIds, r.StartedAt, ""))
+                .Select(r => new TranscriptRow(r.Id, r.ToolUseIds, r.StartedAt, conversationMachineId))
                 .ToList();
             var ownerMap = BuildToolUseOwnerMap(sessionKeys);
             var windows = BuildSessionWindows(sessionKeys);
@@ -3238,6 +3282,8 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 remCacheCreate += row.CacheCreationTokens;
                 remCacheRead += row.CacheReadTokens;
                 remRows++;
+                remainderRows.Add(new RemainderWireRow(
+                    row.Id, row.Model, row.InputTokens, row.OutputTokens, row.CacheCreationTokens, row.CacheReadTokens));
             }
         }
 
@@ -3259,6 +3305,8 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 remCacheCreate += row.CacheCreationTokens;
                 remCacheRead += row.CacheReadTokens;
                 remRows++;
+                remainderRows.Add(new RemainderWireRow(
+                    row.Id, row.Model, row.InputTokens, row.OutputTokens, row.CacheCreationTokens, row.CacheReadTokens));
             }
         }
 
@@ -3282,7 +3330,7 @@ public class ObservabilityAuditDb(SqliteConnection connection)
         totalCacheRead += remCacheRead;
 
         return new ConversationRollupData(
-            scopeConversationId, slices, remainder,
+            scopeConversationId, sessionKeys, slices, remainder, remainderRows,
             totalInput, totalOutput, totalCacheCreate, totalCacheRead);
     }
 

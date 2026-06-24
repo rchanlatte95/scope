@@ -54,17 +54,40 @@ public sealed record SessionCostSlice(
     int RowCount);
 
 /// <summary>
+/// A single conversation-remainder wire row (transcript or proxy) that NO session owns. Carries the
+/// per-row model + token buckets so the document layer can PRICE the remainder per-row by model
+/// (cache-create and cache-read are priced at different rates, so cost is not derivable from summed
+/// token scalars). This is the cost-bearing constituent of the conversation-level remainder (R3).
+/// </summary>
+public sealed record RemainderWireRow(
+    string Id,
+    string? Model,
+    long InputTokens,
+    long OutputTokens,
+    long CacheCreationTokens,
+    long CacheReadTokens);
+
+/// <summary>
 /// Output of <see cref="ObservabilityAuditDb.ComputeConversationRollup"/>: per-session slices,
 /// a remainder slice (unowned rows), and conversation-level totals.
 /// <para>
 /// Invariant: TotalInputTokens == sum(SessionSlices[i].InputTokens) + Remainder.InputTokens
 /// (and similarly for Output/CacheCreation/CacheRead). This is exact by construction (no estimation).
 /// </para>
+/// <para>
+/// <see cref="SessionKeys"/> is the ordered set of session keys in the conversation; the document
+/// layer prices each session's cost via its per-session RollupBody so the conversation total cost
+/// reconciles with the per-session trace screen BY CONSTRUCTION. <see cref="RemainderRows"/> are the
+/// unowned wire rows (transcript + proxy) the document layer prices per-row by model to obtain the
+/// conversation-level remainder cost, giving conversation_total_cost == Σ(session cost) + remainder_cost.
+/// </para>
 /// </summary>
 public sealed record ConversationRollupData(
     string ScopeConversationId,
+    IReadOnlyList<string> SessionKeys,
     IReadOnlyList<SessionCostSlice> SessionSlices,
     SessionCostSlice Remainder,
+    IReadOnlyList<RemainderWireRow> RemainderRows,
     long TotalInputTokens,
     long TotalOutputTokens,
     long TotalCacheCreationTokens,
