@@ -3,6 +3,7 @@ namespace Scope.Core.Telemetry;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Scope.Core.Utilities;
+using Scope.Core.Telemetry.Trace;
 using System.Globalization;
 
 // Public contract preserved (T-2026-06-17 sweep, owner): this is the public Scope.Core DB-query API
@@ -2413,6 +2414,226 @@ public class ObservabilityAuditDb(SqliteConnection connection)
                 row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
             rows.Add(row);
         }
+        return rows;
+    }
+
+    // =========================================================================
+    // ST-03: DB readers that build the pure TranscriptRowAttributor inputs.
+    // Contract: internal design notes, signature#readers.
+    // =========================================================================
+
+    /// <summary>
+    /// Builds the tool-use-owner map for the given conversation sessions.
+    /// Queries <c>obs_agent_events</c> JOIN <c>obs_agent_sessions</c> for all rows whose
+    /// <c>session_key</c> is in <paramref name="conversationSessionKeys"/> and
+    /// <c>tool_use_id</c> IS NOT NULL. Returns a map from tool_use_id to
+    /// <see cref="ToolUseOwner"/> (session key + machine id from the session row).
+    /// <para>
+    /// Duplicate id policy: first-occurrence-wins (tool_use_ids are globally unique at the
+    /// provider level; a duplicate can only arise from a data corruption or an extremely rare
+    /// provider collision, neither of which should change attribution after the fact).
+    /// </para>
+    /// Reader-gap: self-ensures the obs schema so a lazily-migrated live db (obs v17 applied
+    /// only on the write path) does not fail this SELECT on the <c>tool_use_id</c> column.
+    /// Uses <see cref="StringComparer.Ordinal"/> as required by the contract.
+    /// </summary>
+    public IReadOnlyDictionary<string, ToolUseOwner> BuildToolUseOwnerMap(
+        IReadOnlyCollection<string> conversationSessionKeys)
+    {
+        var result = new Dictionary<string, ToolUseOwner>(StringComparer.Ordinal);
+        if (conversationSessionKeys.Count == 0) return result;
+
+        // Reader-gap: tool_use_id is a v17 column; EnsureSchema is additive + idempotent.
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort; query degrades gracefully below */ }
+
+        var keys = conversationSessionKeys.ToList();
+        const int batchSize = 50;
+        for (var i = 0; i < keys.Count; i += batchSize)
+        {
+            var batch = keys.GetRange(i, Math.Min(batchSize, keys.Count - i));
+            using var cmd = connection.CreateCommand();
+            var placeholders = new List<string>(batch.Count);
+            for (var j = 0; j < batch.Count; j++)
+            {
+                var p = $"$k{j}";
+                placeholders.Add(p);
+                cmd.Parameters.AddWithValue(p, batch[j]);
+            }
+            cmd.CommandText = $"""
+                SELECT e.tool_use_id, e.session_key, s.machine_id
+                FROM obs_agent_events e
+                JOIN obs_agent_sessions s ON s.session_key = e.session_key
+                WHERE e.session_key IN ({string.Join(", ", placeholders)})
+                  AND e.tool_use_id IS NOT NULL;
+                """;
+            try
+            {
+                using var reader = cmd.ExecuteReaderRetrying();
+                while (reader.Read())
+                {
+                    var toolUseId = reader.GetString(0);
+                    var sessionKey = reader.GetString(1);
+                    var machineId = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                    // First-occurrence-wins: a duplicate tool_use_id is silently ignored.
+                    result.TryAdd(toolUseId, new ToolUseOwner(sessionKey, machineId));
+                }
+            }
+            catch (SqliteException) { /* schema too old or column absent; return partial result */ }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Builds one <see cref="SessionWindow"/> per session in <paramref name="conversationSessionKeys"/>
+    /// that has at least one recorded event. The window is bounded to RECORDED events:
+    /// StartIso = MIN(created_at), EndIso = MAX(created_at) from <c>obs_agent_events</c>.
+    /// MachineId comes from <c>obs_agent_sessions.machine_id</c>.
+    /// Sessions with zero events are excluded (they have no temporal extent to bound).
+    /// <para>
+    /// Reader-gap: self-ensures the obs schema once so a lazily-migrated live db does not fail.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<SessionWindow> BuildSessionWindows(
+        IReadOnlyCollection<string> conversationSessionKeys)
+    {
+        var result = new List<SessionWindow>();
+        if (conversationSessionKeys.Count == 0) return result;
+
+        // Reader-gap: machine_id is a v16 column; EnsureSchema is additive + idempotent.
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+
+        var keys = conversationSessionKeys.ToList();
+        const int batchSize = 50;
+        for (var i = 0; i < keys.Count; i += batchSize)
+        {
+            var batch = keys.GetRange(i, Math.Min(batchSize, keys.Count - i));
+            using var cmd = connection.CreateCommand();
+            var placeholders = new List<string>(batch.Count);
+            for (var j = 0; j < batch.Count; j++)
+            {
+                var p = $"$k{j}";
+                placeholders.Add(p);
+                cmd.Parameters.AddWithValue(p, batch[j]);
+            }
+            cmd.CommandText = $"""
+                SELECT e.session_key, MIN(e.created_at), MAX(e.created_at), s.machine_id
+                FROM obs_agent_events e
+                JOIN obs_agent_sessions s ON s.session_key = e.session_key
+                WHERE e.session_key IN ({string.Join(", ", placeholders)})
+                GROUP BY e.session_key;
+                """;
+            try
+            {
+                using var reader = cmd.ExecuteReaderRetrying();
+                while (reader.Read())
+                {
+                    var sessionKey = reader.GetString(0);
+                    var startIso = reader.GetString(1);
+                    var endIso = reader.GetString(2);
+                    var machineId = reader.IsDBNull(3) ? "" : reader.GetString(3);
+                    result.Add(new SessionWindow(sessionKey, machineId, startIso, endIso));
+                }
+            }
+            catch (SqliteException) { /* schema too old; return partial result */ }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Loads all <c>source='transcript'</c> wire_calls rows for <paramref name="conversationId"/>,
+    /// ordered by <c>started_at ASC</c> (transcript order).
+    /// <para>
+    /// <c>MachineId</c> on each returned <see cref="TranscriptRow"/> is resolved from
+    /// <c>obs_agent_sessions.machine_id</c> for the sessions whose <c>conversation_id</c>
+    /// equals <paramref name="conversationId"/>. Transcript wire rows carry <c>machine_id = NULL</c>
+    /// (the proxy writes the machine id into the session row, not the wire row, for this source).
+    /// Resolution strategy:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>If all matching sessions agree on one non-empty machine_id, that machine is used
+    ///         for every transcript row.</item>
+    ///   <item>If sessions disagree or none are found, each row falls back to the wire row's own
+    ///         <c>machine_id</c> column (which will be null/empty for transcript rows — the caller
+    ///         must treat an empty MachineId as "unknown machine").</item>
+    /// </list>
+    /// Reader-gap: self-ensures both the obs schema and the wire schema so lazily-migrated live
+    /// dbs do not 500 on missing columns.
+    /// </summary>
+    public IReadOnlyList<TranscriptRow> LoadTranscriptRows(string conversationId)
+    {
+        if (string.IsNullOrEmpty(conversationId)) return [];
+
+        // Reader-gap: obs schema for machine_id / conversation_id (v16); wire schema for source (v3).
+        // HasWireCallsTable self-ensures the wire schema when the table exists.
+        try { new ObservabilitySchemaManager(connection).EnsureSchema(); }
+        catch (SqliteException) { /* best-effort */ }
+        if (!HasWireCallsTable()) return []; // no wire_calls table at all -> nothing to load
+
+        // Resolve the conversation's machine from the owning sessions.
+        // If all sessions agree on a single non-empty machine_id, use it; otherwise fall back
+        // to the wire row's own machine_id column (which is null/empty for transcript rows).
+        string? conversationMachineId = null;
+        try
+        {
+            using var sessCmd = connection.CreateCommand();
+            sessCmd.CommandText = """
+                SELECT DISTINCT machine_id
+                FROM obs_agent_sessions
+                WHERE conversation_id = $convId
+                  AND machine_id IS NOT NULL
+                  AND machine_id <> '';
+                """;
+            sessCmd.Parameters.AddWithValue("$convId", conversationId);
+            using var sessReader = sessCmd.ExecuteReaderRetrying();
+            string? first = null;
+            var agreeable = true;
+            while (sessReader.Read())
+            {
+                var m = sessReader.GetString(0);
+                if (first == null) { first = m; }
+                else if (!string.Equals(first, m, StringComparison.Ordinal)) { agreeable = false; break; }
+            }
+            // Use resolved machine only when all non-null sessions agree.
+            if (agreeable && first != null) conversationMachineId = first;
+        }
+        catch (SqliteException) { /* pre-v16 schema: conversation_id column absent; fall back */ }
+
+        var rows = new List<TranscriptRow>();
+        try
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT id, tool_use_ids, started_at, machine_id
+                FROM wire_calls
+                WHERE source = 'transcript'
+                  AND cc_session_id = $convId
+                ORDER BY started_at ASC;
+                """;
+            cmd.Parameters.AddWithValue("$convId", conversationId);
+            using var reader = cmd.ExecuteReaderRetrying();
+            while (reader.Read())
+            {
+                var wireRowId = reader.GetString(0);
+                var toolUseIdsRaw = reader.IsDBNull(1) ? null : reader.GetString(1);
+                var startedAt = reader.GetString(2);
+                // Wire row machine_id is null/empty for transcript rows; use the resolved
+                // conversation machine if available, otherwise the row's own value (empty string).
+                string machineId;
+                if (conversationMachineId != null)
+                {
+                    machineId = conversationMachineId;
+                }
+                else
+                {
+                    machineId = reader.IsDBNull(3) ? "" : reader.GetString(3);
+                }
+                var toolUseIds = ParseWireToolUseIds(toolUseIdsRaw ?? "");
+                rows.Add(new TranscriptRow(wireRowId, toolUseIds, startedAt, machineId));
+            }
+        }
+        catch (SqliteException) { /* schema too old; degrade to empty */ }
         return rows;
     }
 }
