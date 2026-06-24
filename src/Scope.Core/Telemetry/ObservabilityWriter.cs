@@ -20,6 +20,9 @@ public sealed class ObservabilityWriter : IDisposable
 
     /// <summary>
     /// Opens or creates telemetry.db in the given .scope/ directory and ensures the obs_* schema exists.
+    /// After EnsureSchema, runs <see cref="BackfillScopeConversationIds"/> once to fill any
+    /// pre-existing sessions that have conversation_id + machine_id but no scope_conversation_id
+    /// (idempotent; safe to re-run on every open).
     /// </summary>
     public ObservabilityWriter(string scopeDirectory)
     {
@@ -28,11 +31,13 @@ public sealed class ObservabilityWriter : IDisposable
         _ownsConnection = true;
         new ObservabilitySchemaManager(_connection).EnsureSchema();
         _db = new ObservabilityDb(_connection);
+        BackfillScopeConversationIds();
     }
 
     /// <summary>
     /// Uses an existing connection (e.g., shared with TelemetryWriter to avoid double open/schema-check).
     /// The caller retains ownership of the connection.
+    /// After EnsureSchema, runs <see cref="BackfillScopeConversationIds"/> once (idempotent).
     /// </summary>
     public ObservabilityWriter(SqliteConnection connection)
     {
@@ -40,6 +45,7 @@ public sealed class ObservabilityWriter : IDisposable
         _ownsConnection = false;
         new ObservabilitySchemaManager(_connection).EnsureSchema();
         _db = new ObservabilityDb(_connection);
+        BackfillScopeConversationIds();
     }
 
     /// <summary>
@@ -203,6 +209,9 @@ public sealed class ObservabilityWriter : IDisposable
     /// path supplies a non-null value (SessionStart and UserSubmit pass null to avoid phantom binds).
     /// <paramref name="machineId"/> (schema v16) is the locally-minted stable machine id for
     /// cross-machine merge correctness. Set-once via COALESCE.
+    /// When BOTH <paramref name="machineId"/> and <paramref name="conversationId"/> are non-null,
+    /// this method also calls <see cref="ResolveScopeConversationId"/> to mint or look up the
+    /// durable <c>scope_conversation_id</c> and stamps it on the session row (ST-07).
     /// </summary>
     public void RecordAgentEvent(
         string sessionKey,
@@ -224,7 +233,14 @@ public sealed class ObservabilityWriter : IDisposable
         if (_disposed) return;
         try
         {
-            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation, conversationId, machineId);
+            // Resolve scope_conversation_id only when BOTH machine_id and the sustained stem are known.
+            // Mirrors the tool-call-only discipline: SessionStart and UserSubmit pass conversationId=null
+            // so this branch is skipped on those phantom paths (same last-write-wins discipline).
+            string? scopeConversationId = null;
+            if (!string.IsNullOrEmpty(machineId) && !string.IsNullOrEmpty(conversationId))
+                scopeConversationId = ResolveScopeConversationId(machineId, conversationId);
+
+            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation, conversationId, machineId, scopeConversationId);
             _db.InsertAgentEventWithSpan(sessionKey, requestId, eventType, eventDataJson, spanId, status);
         }
         catch (Exception ex)
@@ -245,6 +261,9 @@ public sealed class ObservabilityWriter : IDisposable
     /// header-based wire attribution pass can bind interactive wire rows to this session. Set-once via
     /// COALESCE in <see cref="ObservabilityDb.UpsertAgentSession"/>. Null on cron / no-host-id callers.
     /// </para>
+    /// When BOTH <paramref name="machineId"/> and <paramref name="conversationId"/> are non-null,
+    /// this method also calls <see cref="ResolveScopeConversationId"/> and stamps the resolved
+    /// <c>scope_conversation_id</c> on the session row (ST-07).
     /// </summary>
     public void RecordAgentSession(
         string sessionKey,
@@ -261,7 +280,11 @@ public sealed class ObservabilityWriter : IDisposable
         if (_disposed) return;
         try
         {
-            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation, conversationId, machineId);
+            string? scopeConversationId = null;
+            if (!string.IsNullOrEmpty(machineId) && !string.IsNullOrEmpty(conversationId))
+                scopeConversationId = ResolveScopeConversationId(machineId, conversationId);
+
+            _db.UpsertAgentSession(sessionKey, agentType, agentSubtype, parentSessionKey, origin, ccSessionId, baseSessionKey, generation, conversationId, machineId, scopeConversationId);
         }
         catch (Exception ex)
         {
@@ -387,6 +410,157 @@ public sealed class ObservabilityWriter : IDisposable
         {
             Log.Warning("Observability user_submit count failed (non-fatal): {ErrorMessage}", ex.Message);
             return 0;
+        }
+    }
+
+    // =====================================================================
+    // scope_conversation_id resolver (ST-07, T-2026-06-23-01)
+    // =====================================================================
+
+    /// <summary>
+    /// Resolves the durable Scope-owned <c>scope_conversation_id</c> for a (machine_id, stem) pair
+    /// using first-insert-wins semantics inside a BEGIN IMMEDIATE transaction, mirroring
+    /// <see cref="BindGeneration"/> / <see cref="ResolveEffectiveSessionKey"/>.
+    ///
+    /// <para>
+    /// On first sight: mints a uuid7, inserts <c>obs_conversations</c> + <c>obs_conversation_bindings</c>,
+    /// commits, returns the new id. On re-resolve: the SELECT inside the BEGIN IMMEDIATE finds the
+    /// existing row and returns it (idempotent). Mint race (concurrent inserter wins the PK): the catch
+    /// branch on attempt 0 rolls back and re-SELECTs the winner's now-visible binding (copy of
+    /// BindGeneration's catch-and-reselect).
+    /// </para>
+    ///
+    /// <para>
+    /// Never throws: on any unexpected failure degrades gracefully by returning null (the caller passes
+    /// null to <c>UpsertAgentSession</c> which leaves the column NULL, preserving forward writes).
+    /// </para>
+    /// </summary>
+    /// <param name="machineId">The locally-minted stable machine id.</param>
+    /// <param name="stem">The conversation stem (transcript filename stem or host session id fallback).</param>
+    /// <returns>The resolved scope_conversation_id, or null on failure.</returns>
+    public string? ResolveScopeConversationId(string machineId, string stem)
+    {
+        if (_disposed) return null;
+        if (string.IsNullOrEmpty(machineId) || string.IsNullOrEmpty(stem)) return null;
+
+        try
+        {
+            return BindConversation(machineId, stem);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("scope_conversation_id resolver failed (non-fatal): {ErrorMessage}", ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Transactional allocator behind <see cref="ResolveScopeConversationId"/>. Mirrors
+    /// <see cref="BindGeneration"/>: BEGIN IMMEDIATE, SELECT existing, INSERT on first sight,
+    /// catch PK collision on attempt 0 and re-SELECT.
+    /// </summary>
+    private string BindConversation(string machineId, string stem)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var txn = _connection.BeginTransaction(deferred: false);
+
+            var existing = _db.SelectConversationBinding(machineId, stem, txn);
+            if (existing != null)
+            {
+                txn.Commit();
+                return existing;
+            }
+
+            var newId = Guid.GetGuid7String();
+            var now = DateTime.UtcNow.ToString("o");
+
+            try
+            {
+                _db.InsertConversation(newId, machineId, now, txn);
+                _db.InsertConversationBinding(machineId, stem, newId, now, txn);
+                txn.Commit();
+                return newId;
+            }
+            catch (SqliteException) when (attempt == 0)
+            {
+                // Lost the PK race to a concurrent inserter: roll back and re-SELECT.
+                txn.Rollback();
+            }
+        }
+
+        // Both attempts raced: read the winner's binding outside a write txn.
+        return _db.SelectConversationBinding(machineId, stem, txn: null) ?? throw new InvalidOperationException(
+            $"scope_conversation_id race: could not resolve binding for ({machineId}, {stem}) after 2 attempts.");
+    }
+
+    /// <summary>
+    /// Relinks <paramref name="fromScopeConversationId"/> to <paramref name="toScopeConversationId"/>
+    /// in a single transaction: repoints all <c>obs_conversation_bindings</c> rows that reference
+    /// <paramref name="fromScopeConversationId"/> and updates matching
+    /// <c>obs_agent_sessions.scope_conversation_id</c> pointers.
+    ///
+    /// <para>
+    /// The orphaned <c>obs_conversations</c> row for <paramref name="fromScopeConversationId"/> is
+    /// intentionally left in place (historical record; invisible to rollups which key on bindings).
+    /// </para>
+    ///
+    /// <para>Never throws; failures are logged and the relink degrades to a no-op.</para>
+    /// </summary>
+    public void RelinkConversation(string fromScopeConversationId, string toScopeConversationId)
+    {
+        if (_disposed) return;
+        if (string.IsNullOrEmpty(fromScopeConversationId) || string.IsNullOrEmpty(toScopeConversationId)) return;
+        if (string.Equals(fromScopeConversationId, toScopeConversationId, StringComparison.Ordinal)) return;
+
+        try
+        {
+            using var txn = _connection.BeginTransaction();
+            _db.RelinkConversationPointers(fromScopeConversationId, toScopeConversationId, txn);
+            txn.Commit();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("RelinkConversation failed (non-fatal): {ErrorMessage}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// One-time idempotent backfill: for existing <c>obs_agent_sessions</c> rows that have a non-null
+    /// <c>conversation_id</c> AND non-null <c>machine_id</c> but a null <c>scope_conversation_id</c>,
+    /// resolves (mint-or-lookup) the scope_conversation_id and sets the pointer.
+    ///
+    /// <para>
+    /// Idempotency is guaranteed by two layers: (1) the WHERE clause in
+    /// <c>ApplyConversationBackfill</c> only touches rows still carrying a null pointer; (2)
+    /// <c>ResolveScopeConversationId</c> uses first-insert-wins on the binding PK, so re-running
+    /// always returns the same id for the same (machine_id, stem) without minting a new one.
+    /// </para>
+    ///
+    /// <para>
+    /// Hook: called from <see cref="ObservabilityWriter(string)"/> and
+    /// <see cref="ObservabilityWriter(SqliteConnection)"/> constructors after EnsureSchema so every
+    /// writer instance (CLI, Server, MCP) backfills automatically on first open.
+    /// </para>
+    ///
+    /// <para>Never throws; failures are logged.</para>
+    /// </summary>
+    public void BackfillScopeConversationIds()
+    {
+        if (_disposed) return;
+        try
+        {
+            var pairs = _db.SelectSessionsNeedingConversationBackfill();
+            foreach (var (machineId, conversationId) in pairs)
+            {
+                var scopeConvId = ResolveScopeConversationId(machineId, conversationId);
+                if (scopeConvId != null)
+                    _db.ApplyConversationBackfill(machineId, conversationId, scopeConvId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("BackfillScopeConversationIds failed (non-fatal): {ErrorMessage}", ex.Message);
         }
     }
 
