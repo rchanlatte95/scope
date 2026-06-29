@@ -3,6 +3,7 @@ namespace Scope.Cli.Cron;
 using System.Collections.Concurrent;
 using Scope.Core.Cron;
 using Scope.Core.Cron.Run;
+using Scope.Core.Entitlement;
 using Scope.Core.Utilities;
 using Serilog;
 
@@ -51,14 +52,36 @@ public static class CronSupervisor
     /// <paramref name="tickDelay"/> overrides the production "sleep until next UTC minute"
     /// delay with a fixed short interval. Pass only from tests to make the loop tick quickly
     /// without waiting for a real minute boundary.
+    ///
+    /// <paramref name="entitlementProvider"/> is used for the B1 launch-time cap check. When
+    /// null, a <see cref="DefaultEntitlementProvider"/> is used (reads disk on every tick).
+    /// Pass an explicit provider in tests to control the cap without touching disk files.
+    ///
+    /// <paramref name="refresher"/> is optional. When non-null, the supervisor calls
+    /// <see cref="IEntitlementRefresher.TryRefreshAsync"/> at startup and each tick so that
+    /// online token renewal happens opportunistically. The throttle gate inside the refresher
+    /// caps actual network calls to at most once per interval (default 4 hours).
     /// </summary>
     public static async Task<int> RunAsync(
         string dbPath, string scopeDir, CancellationToken cancellationToken,
         CronLauncherRegistry? launcherRegistry = null,
-        TimeSpan? tickDelay = null)
+        TimeSpan? tickDelay = null,
+        IEntitlementProvider? entitlementProvider = null,
+        IEntitlementRefresher? refresher = null)
     {
+        // B1: use DefaultEntitlementProvider if none supplied (reads disk on every GetState call).
+        IEntitlementProvider provider = entitlementProvider ?? new DefaultEntitlementProvider();
+
         var utcNow = DateTime.UtcNow;
         Log.Information("scope cron start: supervisor starting at {UtcNow:u}.", utcNow);
+
+        // Opportunistic refresh at supervisor startup. The throttle gate inside TryRefreshAsync
+        // makes this a no-op if a refresh happened recently. Never awaited longer than the
+        // cancellation token allows; failures are swallowed (refresher must-never-throw).
+        if (refresher is not null)
+        {
+            _ = await refresher.TryRefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         // Per-definition state for back-off tracking. ConcurrentDictionary because these are written
         // from the per-launch Task.Run workers (which may run several at once in one tick) while
@@ -129,7 +152,37 @@ public static class CronSupervisor
                     inFlight.Remove(key);
             }
 
-            foreach (var def in enabledDefs)
+            // Opportunistic per-tick refresh (S6 long-lived surface). The throttle gate inside
+            // TryRefreshAsync caps actual network calls to at most once per interval (~4h).
+            if (refresher is not null)
+            {
+                _ = await refresher.TryRefreshAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // B1 launch-time cap: read entitlement each tick so remote revocation takes effect
+            // without a supervisor restart. GetState() reads disk on every call (no in-process
+            // cache), so revocation is reflected within one tick interval.
+            var entitlementState = provider.GetState();
+            var maxEnabledCrons = entitlementState.EffectiveLimits.MaxEnabledCrons; // null = unlimited
+
+            // B1 cap budget: how many NEW crons we may launch this tick.
+            // In-flight tasks already count toward the cap regardless of which defs they are;
+            // we never kill in-flight tasks — only new launches are gated.
+            int newLaunchBudget = maxEnabledCrons is int cap
+                ? Math.Max(0, cap - inFlight.Count)
+                : int.MaxValue;
+            int launchedThisTick = 0;
+
+            // Stable deterministic ordering for cap enforcement: sort by (created_at, id) so the
+            // same set of crons is always prioritised consistently when the cap is binding.
+            // This ensures a revoked pilot with N>cap crons stops the LAST-created excess, not
+            // a random selection that changes each tick.
+            var sortedEnabledDefs = enabledDefs
+                .OrderBy(d => d.CreatedAt, StringComparer.Ordinal)
+                .ThenBy(d => d.Id, StringComparer.Ordinal)
+                .ToList();
+
+            foreach (var def in sortedEnabledDefs)
             {
                 // Back-off check: skip definitions that are cooling down.
                 if (backOffUntil.TryGetValue(def.Id, out var backOffEnd) && tickMinute < backOffEnd)
@@ -163,7 +216,20 @@ public static class CronSupervisor
                     continue;
                 }
 
+                // B1 cap enforcement: check launch budget AFTER schedule and in-flight checks so
+                // only defs that would actually fire this tick consume budget. Definitions excluded
+                // by the cap are skipped (not killed); they remain enabled and eligible for future
+                // ticks once revocation is cleared or additional capacity is granted.
+                if (launchedThisTick >= newLaunchBudget)
+                {
+                    Log.Information(
+                        "scope cron start: '{Label}' skipped — entitlement cap ({Cap} max, {InFlight} in-flight, {Launched} launched this tick).",
+                        def.Label, maxEnabledCrons, inFlight.Count, launchedThisTick);
+                    continue;
+                }
+
                 Log.Information("scope cron start: launching '{Label}' scheduled at {Tick:u}.", def.Label, tickMinute);
+                launchedThisTick++;
 
                 // Capture loop variables for the async task closure.
                 var capturedDef = def;

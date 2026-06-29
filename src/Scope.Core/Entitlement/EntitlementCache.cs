@@ -41,6 +41,37 @@ public static class EntitlementCache
     }
 
     /// <summary>
+    /// Reads the full cache entry (envelope + FetchedAtUtc) from the default path.
+    /// Returns null when the file is missing, empty, or corrupt. Never throws.
+    ///
+    /// The returned <see cref="EntitlementCacheEnvelope.FetchedAtUtc"/> is used by the
+    /// refresher as the success-throttle anchor. It does NOT re-anchor grace; grace is
+    /// always computed from <c>expires_at_utc</c> inside the signed token.
+    /// </summary>
+    public static EntitlementCacheEnvelope? TryReadEntry()
+        => TryReadEntry(CacheFilePath());
+
+    /// <summary>
+    /// Reads the full cache entry from a specified path (overload for testing).
+    /// Returns null when the file is missing, empty, or corrupt. Never throws.
+    /// </summary>
+    public static EntitlementCacheEnvelope? TryReadEntry(string cachePath)
+    {
+        if (!File.Exists(cachePath)) return null;
+        try
+        {
+            var json = File.ReadAllText(cachePath);
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            return JsonSerializer.Deserialize(json, EntitlementJsonContext.Default.EntitlementCacheEnvelope);
+        }
+        catch (Exception ex)
+        {
+            Log.Debug("EntitlementCache: TryReadEntry at {Path} failed: {Message}", cachePath, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Reads the cached token envelope string from disk. Returns null when the file is
     /// missing, empty, or corrupt. Never throws; any failure is debug-logged.
     /// </summary>
@@ -98,7 +129,9 @@ public static class EntitlementCache
             };
             var json = JsonSerializer.Serialize(cacheEntry, EntitlementJsonContext.Default.EntitlementCacheEnvelope);
 
-            var tmp = cachePath + ".tmp";
+            // Use a unique GUID-suffixed temp file so concurrent writers (e.g. activation +
+            // refresher) cannot collide on a single fixed ".tmp" path (S5).
+            var tmp = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(tmp, json);
             File.Move(tmp, cachePath, overwrite: true);
             return true;

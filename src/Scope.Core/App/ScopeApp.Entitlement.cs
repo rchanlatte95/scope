@@ -11,26 +11,19 @@ using Serilog;
 public static partial class ScopeApp
 {
     // =========================================================================
-    // Token activation / deactivation / license-status surface (phase 1)
+    // Token activation / deactivation / license-status surface
     //
-    // CLI-ONLY for phase 1. No HTTP activate endpoint (writing a token is
-    // privileged; widening the loophole attack surface is not acceptable) and
-    // no MCP activate tool (stdout is protocol-only, MCP never mutates host
-    // state). The server picks up CLI activation with zero restart because
+    // CLI-ONLY. No HTTP activate endpoint (writing a token is privileged;
+    // widening the loophole attack surface is not acceptable) and no MCP
+    // activate tool (stdout is protocol-only, MCP never mutates host state).
+    // The server picks up CLI activation with zero restart because
     // DefaultEntitlementProvider re-reads and re-verifies on every GetState()
     // call (no in-process cache).
     //
-    // NOTE (S5 / concurrent-write): EntitlementCache.TryWrite uses a fixed
-    // ".tmp" suffix. Two concurrent writers (e.g. a future refresher + an
-    // activation) could collide on that one temp file. This is acceptable in
-    // phase 1 because NoOpEntitlementRefresher is the only implementation and
-    // never writes. Fix in T-09 with a GUID-suffixed temp name.
-    //
-    // NOTE (B3 / deactivate-clears-credential): No refresh credential or
-    // refresh-state file exists in the current codebase. NoOpEntitlementRefresher
-    // is stateless. When T-09 ships EntitlementCredentialStore, Deactivate MUST
-    // also call EntitlementCredentialStore.TryDelete() and any refresh-state file
-    // deletion here to prevent silent re-activation on the next refresher trigger.
+    // B3 (now closed): Activate writes the license key to EntitlementCredentialStore
+    // so the refresher has a credential to authenticate with. Deactivate deletes BOTH
+    // the token cache AND the credential + refresh-state files so a subsequent refresher
+    // trigger makes no network call and cannot silently re-activate the seat.
     // =========================================================================
 
     /// <summary>
@@ -50,6 +43,7 @@ public static partial class ScopeApp
     /// <param name="jsonErrors">When true, emit error details as JSON to stderr.</param>
     /// <param name="verifier">Injected verifier (tests). Null uses the pinned production key set.</param>
     /// <param name="cachePath">Injected cache path (tests). Null uses the default user-level path.</param>
+    /// <param name="credentialStore">Injected credential store (tests). Null uses the default paths.</param>
     /// <param name="ct">Cancellation token.</param>
     public static Task<ScopeCommandResult> ActivateAsync(
         string envelope,
@@ -57,6 +51,7 @@ public static partial class ScopeApp
         bool jsonErrors,
         EntitlementTokenVerifier? verifier = null,
         string? cachePath = null,
+        EntitlementCredentialStore? credentialStore = null,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -99,6 +94,18 @@ public static partial class ScopeApp
             return Task.FromResult(Error(jsonErrors, ScopeExitCode.Unknown,
                 "Activation failed: could not write entitlement cache. Check file permissions at: " + path));
 
+        // B3: persist the license key as the refresh credential so the refresher can
+        // authenticate with the control plane on subsequent TryRefreshAsync calls.
+        // For the first-cut license-key flow, credential = the token envelope the user pasted.
+        var store = credentialStore ?? new EntitlementCredentialStore();
+        if (!store.TryWriteCredential(trimmed))
+        {
+            // Non-fatal: token cache is already written, activation succeeded.
+            // The refresher will simply have no credential and behave like NoOp until
+            // the user re-activates.
+            Log.Warning("ScopeApp.ActivateAsync: could not write refresh credential; refresher will be a no-op.");
+        }
+
         Log.Information("Entitlement token activated: tier={Tier} status={Status}", state.Tier, state.Status);
         return Task.FromResult(BuildActivateSuccess(state, jsonOutput));
     }
@@ -114,17 +121,39 @@ public static partial class ScopeApp
     /// <param name="jsonErrors">When true, emit error details as JSON to stderr.</param>
     /// <param name="entitlementProvider">Injected provider (tests). Null uses <see cref="DefaultEntitlementProvider"/>.</param>
     /// <param name="cachePath">Injected cache path (tests) used for the "has token" check. Null uses the default path.</param>
+    /// <param name="refresher">Optional refresher (S6). When non-null, a short-bounded refresh is
+    ///   awaited before reading status. Never blocks indefinitely; capped at 5 seconds. Throttle
+    ///   gate inside the refresher makes this a no-op if recently refreshed.</param>
     /// <param name="ct">Cancellation token.</param>
-    public static Task<ScopeCommandResult> LicenseStatusAsync(
+    public static async Task<ScopeCommandResult> LicenseStatusAsync(
         bool jsonOutput,
         bool jsonErrors,
         IEntitlementProvider? entitlementProvider = null,
         string? cachePath = null,
+        IEntitlementRefresher? refresher = null,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         try
         {
+            // S6: explicit license status command warrants a short-bounded refresh attempt so the
+            // user sees the most current server state. The throttle gate inside the refresher makes
+            // this a no-op if a refresh happened recently (i.e. within the 4h throttle interval).
+            // Bounded at 5 seconds so the command never hangs on a slow/down control plane.
+            if (refresher is not null)
+            {
+                try
+                {
+                    using var refreshCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    refreshCts.CancelAfter(TimeSpan.FromSeconds(5));
+                    await refresher.TryRefreshAsync(refreshCts.Token).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Refresh failure is always non-fatal for status display.
+                }
+            }
+
             var cPath = cachePath ?? EntitlementCache.CacheFilePath();
             var hasToken = EntitlementCache.TryReadEnvelope(cPath) is not null;
             var provider = entitlementProvider ?? new DefaultEntitlementProvider();
@@ -136,42 +165,49 @@ public static partial class ScopeApp
             if (jsonOutput)
             {
                 var json = JsonSerializer.Serialize(status, ScopeJsonSerializerContext.Default.CommandEntitlementStatus);
-                return Task.FromResult(ScopeCommandResult.Success(json));
+                return ScopeCommandResult.Success(json);
             }
 
             if (!hasToken)
-                return Task.FromResult(ScopeCommandResult.Success("License status: Free (no token)"));
+                return ScopeCommandResult.Success("License status: Free (no token)");
 
-            return Task.FromResult(ScopeCommandResult.Success(FormatLicenseStatus(status)));
+            return ScopeCommandResult.Success(FormatLicenseStatus(status));
         }
         catch (Exception ex)
         {
             Log.Debug("ScopeApp.LicenseStatusAsync failed: {Message}", ex.Message);
-            return Task.FromResult(Error(jsonErrors, ScopeExitCode.Unknown, "Could not read license status."));
+            return Error(jsonErrors, ScopeExitCode.Unknown, "Could not read license status.");
         }
     }
 
     /// <summary>
-    /// Removes the entitlement token cache, reverting this machine to Free tier.
-    /// Idempotent: succeeds even when no token is cached.
+    /// Removes the entitlement token cache, the refresh credential, and the refresh-state
+    /// file, reverting this machine to Free tier. Idempotent: succeeds even when no files exist.
     ///
-    /// IMPORTANT (B3): No refresh credential or refresh-state file exists in this
-    /// codebase as of T-2026-06-29-01. When T-09 adds <c>EntitlementCredentialStore</c>,
-    /// this method MUST also call <c>EntitlementCredentialStore.TryDelete()</c> and delete
-    /// any refresh-state file so that a subsequent refresher trigger makes no network call
-    /// and does not silently re-activate the deactivated seat.
+    /// B3 (closed): all three files are cleared atomically (best-effort; each deletion is
+    /// independent). After this method returns, a subsequent refresher trigger finds no
+    /// credential, makes NO network call, and cannot silently re-activate the seat.
     /// </summary>
     /// <param name="jsonErrors">When true, emit error details as JSON to stderr.</param>
     /// <param name="cachePath">Injected cache path (tests). Null uses the default user-level path.</param>
-    public static ScopeCommandResult Deactivate(bool jsonErrors, string? cachePath = null)
+    /// <param name="credentialStore">Injected credential store (tests). Null uses the default paths.</param>
+    public static ScopeCommandResult Deactivate(
+        bool jsonErrors,
+        string? cachePath = null,
+        EntitlementCredentialStore? credentialStore = null)
     {
         try
         {
+            // 1. Remove the token cache.
             var path = cachePath ?? EntitlementCache.CacheFilePath();
             EntitlementCache.TryDelete(path);
-            // B3 placeholder: when T-09 ships EntitlementCredentialStore, add:
-            //   EntitlementCredentialStore.TryDelete(credentialPath ?? EntitlementCredentialStore.DefaultPath());
-            //   TryDeleteRefreshStateFile(refreshStatePath ?? RefreshState.DefaultPath());
+
+            // 2. B3: remove the refresh credential so the refresher cannot re-activate.
+            // 3. B3: remove the refresh-state file to avoid stale throttle / failure state.
+            var store = credentialStore ?? new EntitlementCredentialStore();
+            store.TryDeleteCredential();
+            store.TryDeleteRefreshState();
+
             Log.Information("Entitlement token deactivated; machine reverted to Free tier.");
             return ScopeCommandResult.Success("Reverted to Free tier. Entitlement token removed.");
         }
