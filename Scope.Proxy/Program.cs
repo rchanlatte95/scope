@@ -5,13 +5,19 @@ using Serilog;
 using System.Globalization;
 using System.Security.Cryptography;
 
-// scope-proxy: localhost passthrough metering proxy for the Anthropic API.
+// scope-proxy: localhost passthrough metering proxy for the Anthropic and OpenAI APIs.
 // Meter, never gateway. See internal design notes
 //
 // Usage:
 //   scope-proxy [--port 5135] [--bind 127.0.0.1] [--unsafe-bind]
 //               [--token <t>] [--telemetry-db <path>] [--state-file <path>]
-//               [--upstream <url>]
+//               [--upstream <url>] [--provider anthropic|openai]
+//               [--capture-file <path>]
+//
+// --provider anthropic  (default) meters /v1/messages and writes wire_calls rows.
+// --provider openai     routes /v1/responses; Phase A capture stub only (no wire_calls
+//                       rows yet). Use --capture-file or SCOPE_PROXY_CAPTURE_FILE to tee
+//                       raw response bodies to disk for Phase B fixture recording.
 //
 // The per-start token also comes from SCOPE_PROXY_TOKEN (set by the launcher so
 // supervised restarts keep the child's ANTHROPIC_BASE_URL valid); when absent a
@@ -45,6 +51,10 @@ try
     string? telemetryDb = null;
     string? stateFile = null;
     var upstream = "https://api.anthropic.com";
+    var provider = "anthropic";
+    string? captureFile = null;
+    // Track whether --upstream was explicitly provided so we can default it per-provider.
+    var upstreamExplicit = false;
 
     for (var i = 0; i < args.Length; i++)
     {
@@ -56,12 +66,22 @@ try
             case "--token": token = Next(args, ref i, "--token"); break;
             case "--telemetry-db": telemetryDb = Next(args, ref i, "--telemetry-db"); break;
             case "--state-file": stateFile = Next(args, ref i, "--state-file"); break;
-            case "--upstream": upstream = Next(args, ref i, "--upstream"); break;
+            case "--upstream": upstream = Next(args, ref i, "--upstream"); upstreamExplicit = true; break;
+            case "--provider": provider = Next(args, ref i, "--provider"); break;
+            case "--capture-file": captureFile = Next(args, ref i, "--capture-file"); break;
             default:
                 Console.Error.WriteLine($"Unknown argument: {args[i]}");
                 return 13;
         }
     }
+
+    // When --provider openai is specified and --upstream was not explicitly overridden,
+    // default to the OpenAI base URL instead of Anthropic.
+    if (!upstreamExplicit && provider.Equals("openai", StringComparison.OrdinalIgnoreCase))
+        upstream = "https://api.openai.com";
+
+    // Capture file: CLI flag takes precedence, env var as fallback.
+    captureFile ??= Environment.GetEnvironmentVariable("SCOPE_PROXY_CAPTURE_FILE");
 
     if (!ProxyServer.ValidateBind(bind, unsafeBind, out var bindError))
     {
@@ -84,6 +104,8 @@ try
         BindAddress = bind,
         Port = port,
         UpstreamBaseUrl = upstream,
+        Provider = provider,
+        CaptureFilePath = captureFile,
     };
 
     var server = await ProxyServer.StartAsync(options).ConfigureAwait(false);
@@ -100,8 +122,8 @@ try
     using var pricingRefresher = new PricingRefresher(telemetryDir ?? Directory.GetCurrentDirectory());
     pricingRefresher.Start();
 
-    Log.Information("scope-proxy listening on 127.0.0.1:{Port} -> {Upstream}; telemetry: {Db}; state: {State}",
-        server.BoundPort, upstream, options.TelemetryDbPath, stateFile);
+    Log.Information("scope-proxy listening on 127.0.0.1:{Port} -> {Upstream} (provider={Provider}); telemetry: {Db}; state: {State}",
+        server.BoundPort, upstream, provider, options.TelemetryDbPath, stateFile);
 
     try
     {

@@ -21,26 +21,23 @@ internal sealed class Forwarder : IDisposable
         "Proxy-Connection", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Host",
     };
 
-    /// <summary>Endpoints the Anthropic adapter understands (prefix match for the list-style ones).</summary>
-    private static readonly string[] KnownEndpoints =
-    [
-        "/v1/messages", "/v1/messages/count_tokens", "/v1/messages/batches", "/v1/models",
-    ];
-
     private readonly HttpMessageInvoker _client;
     private readonly Uri _upstreamBase;
     private readonly WireCallDb _db;
     private readonly BudgetEnforcer _budget;
+    private readonly IWireMeter _meter;
     private long _driftCount;
     private long _recordedCount;
     private long _budgetRefusedCount;
     private bool _disposed;
 
-    public Forwarder(string upstreamBaseUrl, string telemetryDbPath, BudgetEnforcer? budget = null)
+    public Forwarder(string upstreamBaseUrl, string telemetryDbPath, BudgetEnforcer? budget = null,
+        IWireMeter? meter = null)
     {
         _upstreamBase = new Uri(upstreamBaseUrl, UriKind.Absolute);
         _db = new WireCallDb(telemetryDbPath);
         _budget = budget ?? new BudgetEnforcer();
+        _meter = meter ?? new AnthropicWireMeter();
         _client = new HttpMessageInvoker(new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
@@ -81,7 +78,7 @@ internal sealed class Forwarder : IDisposable
         var endpointPathOnly = endpoint;
 
         var metered = HttpMethods.IsPost(context.Request.Method)
-                      && endpointPathOnly.Equals("/v1/messages", StringComparison.Ordinal);
+                      && _meter.IsMetered(endpointPathOnly);
 
         // Budget gate (the proxy's only enforcement): before forwarding a NEW metered model call,
         // refuse with a terminal, non-retryable response when this session has reached its budget.
@@ -93,7 +90,7 @@ internal sealed class Forwarder : IDisposable
             return;
         }
 
-        if (!metered && !IsKnownEndpoint(endpointPathOnly))
+        if (!metered && !IsKnownEndpoint(endpointPathOnly, _meter.KnownEndpoints))
         {
             Interlocked.Increment(ref _driftCount);
             Log.Debug("Unknown endpoint forwarded blindly: {Method} {Endpoint}", context.Request.Method, endpointPathOnly);
@@ -144,11 +141,11 @@ internal sealed class Forwarder : IDisposable
             var contentEncoding = upstreamResponse.Content.Headers.ContentEncoding.FirstOrDefault();
             var isSse = string.Equals(contentType, "text/event-stream", StringComparison.OrdinalIgnoreCase);
 
-            AnthropicSseScanner? scanner = null;
+            IWireSseScanner? scanner = null;
             BoundedTeeBuffer? responseTee = null;
             if (metered)
             {
-                if (isSse && string.IsNullOrEmpty(contentEncoding)) scanner = new AnthropicSseScanner();
+                if (isSse && string.IsNullOrEmpty(contentEncoding)) scanner = _meter.CreateSseScanner();
                 else responseTee = new BoundedTeeBuffer();
             }
 
@@ -187,6 +184,7 @@ internal sealed class Forwarder : IDisposable
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 // Client aborted mid-stream. Disposing upstreamResponse aborts upstream.
+                scanner?.Dispose();
                 return;
             }
             catch (Exception ex) when (responseStarted)
@@ -194,6 +192,7 @@ internal sealed class Forwarder : IDisposable
                 // Upstream died mid-body. Abort so the client sees truncation,
                 // never a fake-complete response.
                 Log.Warning("Upstream stream failed mid-body for {Endpoint}: {Message}", endpointPathOnly, ex.Message);
+                scanner?.Dispose();
                 context.Abort();
                 return;
             }
@@ -204,6 +203,8 @@ internal sealed class Forwarder : IDisposable
                 RecordMeterRow(endpointPathOnly, status, isSse, startedAtUtc, ttftMs,
                     stopwatch.ElapsedMilliseconds, requestTee, responseBytes, scanner, responseTee, contentEncoding, scope,
                     ccSessionId, ccAgentId, ccParentAgentId);
+
+            scanner?.Dispose();
         }
     }
 
@@ -214,19 +215,19 @@ internal sealed class Forwarder : IDisposable
     private void RecordMeterRow(
         string endpoint, int status, bool isSse, DateTime startedAtUtc, long? ttftMs, long totalMs,
         BoundedTeeBuffer requestTee, long responseBytes,
-        AnthropicSseScanner? scanner, BoundedTeeBuffer? responseTee, string? contentEncoding, BudgetScope? scope,
+        IWireSseScanner? scanner, BoundedTeeBuffer? responseTee, string? contentEncoding, BudgetScope? scope,
         string? ccSessionId, string? ccAgentId, string? ccParentAgentId)
     {
         try
         {
-            var summary = AnthropicMeter.SummarizeRequest(requestTee);
+            var summary = _meter.SummarizeRequest(requestTee);
             ResponseUsage? usage = null;
             if (status is >= 200 and < 300)
             {
                 usage = scanner is not null
                     ? new ResponseUsage
                     {
-                        Failed = scanner.Failed || !scanner.SawMessageStart,
+                        Failed = scanner.Failed || !scanner.SawStart,
                         Model = scanner.Model,
                         MessageId = scanner.MessageId,
                         StopReason = scanner.StopReason,
@@ -236,7 +237,7 @@ internal sealed class Forwarder : IDisposable
                         CacheReadTokens = scanner.CacheReadTokens,
                         ToolUseIds = scanner.ToolUseIds,
                     }
-                    : AnthropicMeter.ParseMessageResponse(responseTee!, contentEncoding);
+                    : _meter.ParseNonStreaming(responseTee!, contentEncoding);
             }
 
             // Fold this call's total wire tokens into the session tally so the NEXT new call is gated
@@ -401,8 +402,8 @@ internal sealed class Forwarder : IDisposable
         return set;
     }
 
-    private static bool IsKnownEndpoint(string endpoint) =>
-        KnownEndpoints.Any(known => endpoint.Equals(known, StringComparison.Ordinal)
+    private static bool IsKnownEndpoint(string endpoint, string[] knownEndpoints) =>
+        knownEndpoints.Any(known => endpoint.Equals(known, StringComparison.Ordinal)
                                     || endpoint.StartsWith(known + "/", StringComparison.Ordinal));
 
     public void Dispose()

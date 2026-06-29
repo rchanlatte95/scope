@@ -275,6 +275,66 @@ public static class SeedPricingTable
         CacheCreationUsdPerMillionTokens = null,
     };
 
+    // OpenAI -- GPT-5 family (developers.openai.com/api/docs/pricing, fetched 2026-06-29; verify-needed)
+    // Dash-notation IDs (gpt-5-codex, gpt-5-mini, gpt-5) are the expected Codex CLI wire model IDs
+    // per T-2026-06-29-08 (unconfirmed until G-baseurl gate passes; verify in Phase B).
+    // Dot-notation aliases (gpt-5.3-codex, gpt-5.4-mini, gpt-5.x) are handled by ModelIdNormalizer
+    // prefix mapping and resolve to these same canonical IDs.
+    // OpenAI has no cache-write surcharge so CacheCreationUsdPerMillionTokens = null for all entries.
+
+    // gpt-5-codex: $1.75 in / $0.175 cache-read / $14.00 out per M
+    // Source: developers.openai.com/api/docs/pricing (gpt-5.3-codex row, 2026-06-29)
+    private static readonly ModelPricing Gpt5Codex = new()
+    {
+        Id = "gpt-5-codex",
+        Provider = "openai",
+        Tier = "mid",
+        InputUsdPerMillionTokens = 1.75m,
+        OutputUsdPerMillionTokens = 14.00m,
+        CachedInputUsdPerMillionTokens = 0.175m,
+        CacheCreationUsdPerMillionTokens = null,
+    };
+
+    // gpt-5-mini: $0.75 in / $0.075 cache-read / $4.50 out per M
+    // Source: developers.openai.com/api/docs/pricing (gpt-5.4-mini row, 2026-06-29)
+    private static readonly ModelPricing Gpt5Mini = new()
+    {
+        Id = "gpt-5-mini",
+        Provider = "openai",
+        Tier = "low",
+        InputUsdPerMillionTokens = 0.75m,
+        OutputUsdPerMillionTokens = 4.50m,
+        CachedInputUsdPerMillionTokens = 0.075m,
+        CacheCreationUsdPerMillionTokens = null,
+    };
+
+    // gpt-5: $5.00 in / $0.50 cache-read / $30.00 out per M (flagship gpt-5.5 row)
+    // Source: developers.openai.com/api/docs/pricing (gpt-5.5 row, 2026-06-29)
+    // This entry also catches gpt-5.x catch-all variants via ModelIdNormalizer dot-prefix matching.
+    private static readonly ModelPricing Gpt5 = new()
+    {
+        Id = "gpt-5",
+        Provider = "openai",
+        Tier = "high",
+        InputUsdPerMillionTokens = 5.00m,
+        OutputUsdPerMillionTokens = 30.00m,
+        CachedInputUsdPerMillionTokens = 0.50m,
+        CacheCreationUsdPerMillionTokens = null,
+    };
+
+    // o3: $2.00 in / $0.50 cache-read / $8.00 out per M
+    // Source: developers.openai.com/api/docs/models/o3 (2026-06-29; verify-needed)
+    private static readonly ModelPricing O3 = new()
+    {
+        Id = "o3",
+        Provider = "openai",
+        Tier = "high",
+        InputUsdPerMillionTokens = 2.00m,
+        OutputUsdPerMillionTokens = 8.00m,
+        CachedInputUsdPerMillionTokens = 0.50m,
+        CacheCreationUsdPerMillionTokens = null,
+    };
+
     /// <summary>
     /// All seed entries. This array is the authority for the built-in table;
     /// update rates here and bump <see cref="AsOfDate"/> when publishing a new snapshot.
@@ -296,13 +356,18 @@ public static class SeedPricingTable
         ClaudeSonnet37,
         ClaudeSonnet35,
         ClaudeOpus3,
-        // OpenAI
+        // OpenAI -- GPT-4o family
         Gpt4o,
         Gpt4oMini,
         Gpt41,
         Gpt41Mini,
         Gpt41Nano,
         O4Mini,
+        // OpenAI -- GPT-5 family (developers.openai.com/api/docs/pricing, 2026-06-29; verify-needed)
+        Gpt5Codex,
+        Gpt5Mini,
+        Gpt5,
+        O3,
     ];
 
     /// <summary>

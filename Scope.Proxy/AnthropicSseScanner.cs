@@ -14,7 +14,7 @@ using System.Text.Json;
 ///   content_block_start  -> tool_use content block ids
 ///   message_delta        -> cumulative output_tokens, stop_reason
 /// </summary>
-internal sealed class AnthropicSseScanner
+internal sealed class AnthropicSseScanner : IWireSseScanner
 {
     private const int MaxLineBytes = 1024 * 1024;
 
@@ -155,4 +155,19 @@ internal sealed class AnthropicSseScanner
                && prop.ValueKind == JsonValueKind.Number
                && prop.TryGetInt64(out value);
     }
+
+    // -------------------------------------------------------------------------
+    // IWireSseScanner implementation
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Provider-agnostic alias for <see cref="SawMessageStart"/>. True when the
+    /// Anthropic <c>message_start</c> event (which carries usage) was observed.
+    /// The <see cref="Forwarder"/> uses this via the <see cref="IWireSseScanner"/>
+    /// interface to avoid a hard dependency on the Anthropic-specific property name.
+    /// </summary>
+    public bool SawStart => SawMessageStart;
+
+    /// <summary>No-op: AnthropicSseScanner holds no unmanaged resources.</summary>
+    public void Dispose() { /* no-op */ GC.SuppressFinalize(this); }
 }

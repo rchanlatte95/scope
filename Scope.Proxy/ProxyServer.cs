@@ -19,6 +19,21 @@ internal sealed record ProxyServerOptions
     public string BindAddress { get; init; } = "127.0.0.1";
     public int Port { get; init; } = 5135;
     public string UpstreamBaseUrl { get; init; } = "https://api.anthropic.com";
+
+    /// <summary>
+    /// Upstream provider key. <c>"anthropic"</c> (default) routes /v1/messages and meters
+    /// with <see cref="AnthropicWireMeter"/>. <c>"openai"</c> routes /v1/responses via the
+    /// Phase-A <see cref="OpenAiResponsesMeter"/> capture stub (no wire_calls rows yet).
+    /// </summary>
+    public string Provider { get; init; } = "anthropic";
+
+    /// <summary>
+    /// When set, the OpenAI capture meter appends every proxied /v1/responses body to this
+    /// file (one labeled block per round-trip, streaming and non-streaming). Used to collect
+    /// real Codex traffic for Phase B fixture recording. Ignored for provider != "openai".
+    /// Also settable via the <c>SCOPE_PROXY_CAPTURE_FILE</c> environment variable.
+    /// </summary>
+    public string? CaptureFilePath { get; init; }
 }
 
 /// <summary>
@@ -54,7 +69,10 @@ internal sealed class ProxyServer : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://{FormatHost(options.BindAddress)}:{options.Port}");
 
-        var forwarder = new Forwarder(options.UpstreamBaseUrl, options.TelemetryDbPath);
+        IWireMeter meter = options.Provider.Equals("openai", StringComparison.OrdinalIgnoreCase)
+            ? new OpenAiResponsesMeter(options.CaptureFilePath)
+            : new AnthropicWireMeter();
+        var forwarder = new Forwarder(options.UpstreamBaseUrl, options.TelemetryDbPath, meter: meter);
         var app = builder.Build();
         var server = new ProxyServer(app, forwarder);
         var tokenBytes = Encoding.UTF8.GetBytes(options.Token);

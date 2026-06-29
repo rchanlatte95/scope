@@ -73,7 +73,7 @@ public static class ModelIdNormalizer
         ("claude-3-5-haiku", "claude-haiku-3-5"),
         ("claude-3-haiku",   "claude-haiku-3"),
         ("claude-3-opus",    "claude-opus-3"),
-        // OpenAI
+        // OpenAI -- GPT-4o family
         ("gpt-4o-mini",      "gpt-4o-mini"),        // mini before 4o so shorter prefix doesn't win
         ("gpt-4o",           "gpt-4o"),
         ("gpt-4.1-mini",     "gpt-4.1-mini"),
@@ -82,6 +82,19 @@ public static class ModelIdNormalizer
         ("o4-mini",          "o4-mini"),
         ("o3-mini",          "o4-mini"),             // o3-mini -> treat as o4-mini tier (verify-needed)
         ("o4",               "o4-mini"),             // full o4 -> fallback to mini rates (verify-needed; no o4 list price yet)
+        // OpenAI -- GPT-5 family (pricing from developers.openai.com/api/docs/pricing, 2026-06-29;
+        // dash-notation IDs are the expected Codex CLI wire model IDs per T-2026-06-29-08;
+        // verify-needed until G-baseurl gate passes and Phase B captures real traffic).
+        // Specific entries (gpt-5-codex, gpt-5-mini) MUST precede bare gpt-5 (F9 ordering).
+        // Dot-notation aliases (gpt-5.3-codex, gpt-5.4-mini) handle OpenAI public API model IDs
+        // so they don't fall through to bare gpt-5 pricing ($5.00/M vs $1.75/M or $0.75/M).
+        ("gpt-5-codex",      "gpt-5-codex"),        // dash-notation (Codex CLI; verify-needed)
+        ("gpt-5.3-codex",    "gpt-5-codex"),        // dot-notation OpenAI API alias
+        ("gpt-5-mini",       "gpt-5-mini"),          // dash-notation
+        ("gpt-5.4-mini",     "gpt-5-mini"),          // dot-notation OpenAI API alias
+        ("gpt-5",            "gpt-5"),               // gpt-5 exact + gpt-5.x catch-all via dot match
+        // OpenAI -- o3 reasoning model (developers.openai.com/api/docs/models/o3, 2026-06-29)
+        ("o3",               "o3"),
     ];
 
     // Date-version suffix pattern: 8-digit date like -20241022 or -20250514
