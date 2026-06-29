@@ -173,8 +173,11 @@ public sealed class HttpClientEntitlementTransport(HttpClient httpClient) : IEnt
 ///     (anchored on <c>expires_at_utc</c>, not on <c>FetchedAtUtc</c> — C-cite).</item>
 ///   <item><b>Within-process single-shot (S5):</b> a <see cref="SemaphoreSlim"/> serialises
 ///     concurrent in-process triggers so at most one POST occurs per interval.</item>
-///   <item><b>Cross-process throttle (S5):</b> a per-process file lock prevents two simultaneous
-///     OS-level processes from both POSTing in the same throttle window.</item>
+///   <item><b>Cross-process throttle (S5):</b> a best-effort persisted last-attempt timestamp
+///     (entitlement-refresh.json) throttles separate OS processes. This is NOT an OS file lock:
+///     a TOCTOU race lets two processes crossing the same interval boundary within a sub-second
+///     window both POST. Harmless — the validate endpoint is idempotent and both paths
+///     verify-then-write an equivalent signed token.</item>
 /// </list>
 ///
 /// Constructor parameters are injectable for testing; pass null to use production defaults.
@@ -306,10 +309,9 @@ public sealed class ControlPlaneEntitlementRefresher : IEntitlementRefresher
                 return false;
             }
 
-            // Cross-process throttle (S5 cross-process): try to acquire an exclusive file
-            // lock. If another OS process holds it, they're refreshing now; skip.
-            // We also check the persisted last-attempt time for processes that released
-            // the lock recently but are still within the throttle window.
+            // Cross-process throttle (S5): best-effort, NOT an OS lock. Check the persisted
+            // last-attempt time; if another process attempted within the interval, skip. A
+            // TOCTOU race can still let two processes both POST (harmless: idempotent endpoint).
             var state = _credentialStore.TryReadRefreshState();
             if (state?.LastAttemptUtc is { } fileAttemptStr
                 && DateTime.TryParse(fileAttemptStr, null, UtcParseStyles, out var fileAttempt)
