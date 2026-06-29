@@ -87,8 +87,11 @@ public static class ScopeServerHost
             // single-file publish a true single binary (no loose wwwroot folder next to the
             // exe). When no assets were embedded (dotnet-only build without node), the
             // server runs in API-only mode and "/" returns a plain-text notice.
-            // Test seam: setting "spa" to "off" forces API-only mode for deterministic tests.
-            var spaProvider = string.Equals(app.Configuration["spa"], "off", StringComparison.Ordinal) ? null : TryCreateSpaFileProvider();
+            // SPA provider selection is driven by the "spa" configuration value (see
+            // ResolveSpaFileProvider): "off" forces API-only mode (deterministic test seam), a
+            // directory path serves a loose SPA build (integration tests + dev convenience), and
+            // anything else uses the embedded manifest baked into this assembly at build time.
+            var spaProvider = ResolveSpaFileProvider(app.Configuration["spa"]);
             if (spaProvider != null)
             {
                 app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = spaProvider });
@@ -775,6 +778,32 @@ public static class ScopeServerHost
     }
 
     // ---- private static helpers (no outer-variable captures) ----
+
+    // SPA provider selection seam (driven by the "spa" configuration value):
+    //   "off"            -> null (API-only mode; deterministic seam used by endpoint tests so the
+    //                       SPA fallback never shadows /api routes under assertion).
+    //   <directory path> -> PhysicalFileProvider over that directory when it contains index.html.
+    //                       Lets integration tests exercise the FULL SPA middleware pipeline
+    //                       (default file, static files, deep-link fallback, /api precedence)
+    //                       deterministically without compile-time embedding, and serves as a dev
+    //                       convenience to serve frontend/dist without rebuilding Scope.Server.
+    //   null/empty/other -> the EMBEDDED manifest baked into this assembly at build time.
+    // Returns null when nothing resolves (API-only mode). Returns IFileProvider because the two
+    // concrete providers (PhysicalFileProvider, ManifestEmbeddedFileProvider) share only the
+    // interface; the SPA middleware is provider-agnostic.
+    private static IFileProvider? ResolveSpaFileProvider(string? spaSetting)
+    {
+        if (string.Equals(spaSetting, "off", StringComparison.Ordinal))
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(spaSetting) && Directory.Exists(spaSetting))
+        {
+            var physical = new PhysicalFileProvider(Path.GetFullPath(spaSetting));
+            return physical.GetFileInfo("index.html").Exists ? physical : null;
+        }
+
+        return TryCreateSpaFileProvider();
+    }
 
     // XP7b: SPA is served from an EMBEDDED manifest compiled into this assembly at build time.
     // TryCreateSpaFileProvider uses typeof(ScopeServerHost).Assembly so the manifest is found
