@@ -97,6 +97,19 @@ public sealed record EntitlementToken
     /// </summary>
     [JsonPropertyName("trial_ends_at_utc")]
     public string? TrialEndsAtUtc { get; init; }
+
+    /// <summary>
+    /// Optional per-token grace window in hours. Overrides the global 72-hour default
+    /// (<see cref="EntitlementStateResolver.GraceWindow"/>) when present and positive.
+    /// Absent or null means "use the global default." Values outside [1, 720] are clamped
+    /// (negative/zero -> global default; greater than 720 -> 720 hours / 30 days).
+    ///
+    /// IMPORTANT: this claim is only read after the token's paid validity window has
+    /// elapsed (<c>now &gt;= expires_at_utc</c>). A bad value can never affect the
+    /// Paid or Trial branch. Issuer contract: additive/optional; old verifiers see 72h.
+    /// </summary>
+    [JsonPropertyName("grace_hours")]
+    public int? GraceHours { get; init; }
 }
 
 /// <summary>

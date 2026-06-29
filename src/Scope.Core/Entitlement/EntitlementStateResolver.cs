@@ -52,7 +52,8 @@ public static class EntitlementStateResolver
             }
 
             // expiresAt is now a true UTC instant (see UtcParseStyles). All comparisons are UTC-vs-UTC.
-            var graceEnd = expiresAt + GraceWindow;
+            // graceEnd is computed LAZILY below (post-expiry branch only) so a bad GraceHours value
+            // in the token can never affect the Paid / Trial path.
 
             // Deny-to-free guard for an absent/renamed `limits` claim. System.Text.Json source-gen
             // does NOT apply the record's init default when the JSON property is missing or null, so
@@ -95,7 +96,20 @@ public static class EntitlementStateResolver
                 };
             }
 
-            // Within grace window: expiry <= now < expiry+72h.
+            // --- Post-expiry path: compute graceEnd lazily here so no bad GraceHours value ---
+            // can ever reach the valid-window (Paid/Trial) return paths above.
+            //
+            // Per-token grace (B2 hardening): use GraceHours claim when present and positive;
+            // clamp to [0, SaneMaxGraceHours]. Absent/negative/zero -> GraceWindow (72h default).
+            const int SaneMaxGraceHours = 720; // 30 days max
+            TimeSpan effectiveGrace;
+            if (token.GraceHours is { } rawGrace && rawGrace > 0)
+                effectiveGrace = TimeSpan.FromHours(Math.Min(rawGrace, SaneMaxGraceHours));
+            else
+                effectiveGrace = GraceWindow;
+            var graceEnd = expiresAt + effectiveGrace;
+
+            // Within grace window: expiry <= now < expiry+effectiveGrace.
             if (now < graceEnd)
             {
                 return new EntitlementState
@@ -109,7 +123,7 @@ public static class EntitlementStateResolver
                 };
             }
 
-            // Grace window also elapsed: now >= expiry+72h -> Expired -> free-tier limits.
+            // Grace window also elapsed: now >= expiry+effectiveGrace -> Expired -> free-tier limits.
             return new EntitlementState
             {
                 Tier = token.Tier,
