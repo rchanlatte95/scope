@@ -24,6 +24,7 @@ using System.Globalization;
 public static class ProxyLauncher
 {
     private const int DefaultPort = 5135;
+    private const int DefaultOpenAiPort = 5136;
     private const int MaxRestarts = 5;
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromSeconds(15);
 
@@ -50,19 +51,31 @@ public static class ProxyLauncher
 
     /// <summary>
     /// Start-or-attach to a healthy wire-metering proxy and return a <see cref="ProxyLease"/>. Attaches
-    /// to the proxy advertised by a fresh <c>.scope/proxy.json</c> when it is reachable on
-    /// <c>/healthz</c>; otherwise spawns a fresh proxy on <paramref name="port"/> with a per-start token
-    /// and waits for it to report healthy. The returned lease's stop action is a no-op on the attach
-    /// path (never tears down a proxy this call did not start), so callers may always invoke
-    /// <see cref="ProxyLease.Stop"/> on exit without risking a shared service. This is the reusable seam
-    /// shared by <c>scope proxy run</c> and the interactive launch gate.
+    /// to the proxy advertised by a fresh state file when it is reachable on <c>/healthz</c>; otherwise
+    /// spawns a fresh proxy on <paramref name="port"/> with a per-start token and waits for it to report
+    /// healthy. The returned lease's stop action is a no-op on the attach path (never tears down a proxy
+    /// this call did not start), so callers may always invoke <see cref="ProxyLease.Stop"/> on exit
+    /// without risking a shared service. This is the reusable seam shared by <c>scope proxy run</c> and
+    /// the interactive launch gate.
+    /// <para>
+    /// Provider determines which upstream the proxy targets and which state file is used:
+    /// <list type="bullet">
+    ///   <item><c>anthropic</c> (default): binds on port 5135, state file <c>proxy.json</c>,
+    ///   no <c>--provider</c> flag (Scope.Proxy defaults to Anthropic).</item>
+    ///   <item><c>openai</c>: binds on port 5136, state file <c>proxy.openai.json</c>,
+    ///   passes <c>--provider openai</c> to the proxy (targets api.openai.com).</item>
+    /// </list>
+    /// Both instances coexist on different ports; each owns its own state file so attach/start
+    /// never confuses an Anthropic proxy for an OpenAI one.
+    /// </para>
     /// </summary>
-    public static async Task<ProxyLease> EnsureProxyAsync(int? port, string? telemetryDbOverride, CancellationToken ct)
+    public static async Task<ProxyLease> EnsureProxyAsync(int? port, string? telemetryDbOverride, CancellationToken ct, string provider = "anthropic")
     {
         var telemetryDb = telemetryDbOverride ?? ResolveTelemetryDbPath();
-        var stateFile = StateFilePath(telemetryDb);
+        var stateFile = StateFilePath(telemetryDb, provider);
+        var effectivePort = port ?? DefaultPortFor(provider);
 
-        var (handle, _) = await AttachOrStartAsync(port ?? DefaultPort, telemetryDb, stateFile, ct).ConfigureAwait(false);
+        var (handle, _) = await AttachOrStartAsync(effectivePort, telemetryDb, stateFile, ct, provider).ConfigureAwait(false);
 
         // StopIfOwned() is already a no-op when Process is null (the attach path), so the lease's stop
         // action is safe to invoke unconditionally: it tears down only a proxy this call spawned.
@@ -76,13 +89,13 @@ public static class ProxyLauncher
     /// interactive launch gate. The callers own their own logging.
     /// </summary>
     private static async Task<(ProxyHandle Handle, bool Attached)> AttachOrStartAsync(
-        int port, string telemetryDb, string stateFile, CancellationToken ct)
+        int port, string telemetryDb, string stateFile, CancellationToken ct, string provider)
     {
         var attached = await TryAttachAsync(stateFile, ct).ConfigureAwait(false);
         if (attached is not null)
             return (attached, true);
 
-        var started = await StartProxyAsync(port, telemetryDb, stateFile, ct).ConfigureAwait(false);
+        var started = await StartProxyAsync(port, telemetryDb, stateFile, ct, provider).ConfigureAwait(false);
         return (started, false);
     }
 
@@ -97,7 +110,8 @@ public static class ProxyLauncher
         var stateFile = StateFilePath(telemetryDb);
 
         // 1. Attach to an already-healthy proxy if one is advertised, else start a fresh one.
-        var (handle, attached) = await AttachOrStartAsync(port ?? DefaultPort, telemetryDb, stateFile, ct).ConfigureAwait(false);
+        // RunAsync is the Anthropic/interactive path; the provider is always "anthropic" here.
+        var (handle, attached) = await AttachOrStartAsync(port ?? DefaultPort, telemetryDb, stateFile, ct, "anthropic").ConfigureAwait(false);
         if (attached)
             await Console.Error.WriteLineAsync($"scope proxy: attached to existing proxy pid {handle.State.Pid} on 127.0.0.1:{handle.State.Port}").ConfigureAwait(false);
         else
@@ -298,23 +312,25 @@ public static class ProxyLauncher
         return new ProxyHandle(state, process: null, state.Token, stateFile);
     }
 
-    private static async Task<ProxyHandle> StartProxyAsync(int port, string telemetryDb, string stateFile, CancellationToken ct)
+    private static async Task<ProxyHandle> StartProxyAsync(int port, string telemetryDb, string stateFile, CancellationToken ct, string provider)
     {
         var token = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
-        var proc = SpawnProxy(port, telemetryDb, stateFile, token);
-        var state = await WaitForHealthyAsync(proc, port, token, telemetryDb, ct).ConfigureAwait(false);
+        var proc = SpawnProxy(port, telemetryDb, stateFile, token, provider);
+        var state = await WaitForHealthyAsync(proc, port, token, stateFile, ct).ConfigureAwait(false);
         return new ProxyHandle(state, proc, token, stateFile);
     }
 
     private static async Task<ProxyHandle> RestartProxyAsync(ProxyHandle prev, int port, string telemetryDb, string stateFile, CancellationToken ct)
     {
         // Reuse the same token so the child's already-captured ANTHROPIC_BASE_URL stays valid.
-        var proc = SpawnProxy(port, telemetryDb, stateFile, prev.Token);
-        var state = await WaitForHealthyAsync(proc, port, prev.Token, telemetryDb, ct).ConfigureAwait(false);
+        // RestartProxyAsync is only reachable from SuperviseChildAsync -> RunAsync, which is the
+        // Anthropic/interactive proxy-run path; the provider is always "anthropic" here.
+        var proc = SpawnProxy(port, telemetryDb, stateFile, prev.Token, "anthropic");
+        var state = await WaitForHealthyAsync(proc, port, prev.Token, stateFile, ct).ConfigureAwait(false);
         return new ProxyHandle(state, proc, prev.Token, stateFile);
     }
 
-    private static Process SpawnProxy(int port, string telemetryDb, string stateFile, string token)
+    private static Process SpawnProxy(int port, string telemetryDb, string stateFile, string token, string provider)
     {
         var (fileName, prefixArgs) = ResolveProxyInvocation();
         var psi = new ProcessStartInfo
@@ -331,6 +347,14 @@ public static class ProxyLauncher
         psi.ArgumentList.Add(telemetryDb);
         psi.ArgumentList.Add("--state-file");
         psi.ArgumentList.Add(stateFile);
+
+        // Pass --provider for non-default providers; "anthropic" is the Scope.Proxy default
+        // and needs no flag. "openai" routes the proxy upstream to api.openai.com.
+        if (!string.Equals(provider, "anthropic", StringComparison.OrdinalIgnoreCase))
+        {
+            psi.ArgumentList.Add("--provider");
+            psi.ArgumentList.Add(provider);
+        }
 
         // Detached-quiet: logs go to the rolling file only, never the inherited console.
         psi.Environment["SCOPE_PROXY_QUIET"] = "1";
@@ -430,7 +454,7 @@ public static class ProxyLauncher
     // --- health probing ---
 
     private static async Task<ProxyState> WaitForHealthyAsync(
-        Process proc, int port, string token, string telemetryDb, CancellationToken ct)
+        Process proc, int port, string token, string stateFile, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + HealthTimeout;
         while (DateTime.UtcNow < deadline)
@@ -441,7 +465,7 @@ public static class ProxyLauncher
 
             // Prefer the state file the proxy writes (authoritative port after bind),
             // then confirm liveness via /healthz.
-            var state = ProxyState.TryLoad(StateFilePath(telemetryDb));
+            var state = ProxyState.TryLoad(stateFile);
             if (state is not null && state.Pid == proc.Id)
             {
                 var health = await ProbeHealthAsync(state.Port, ct).ConfigureAwait(false);
@@ -475,14 +499,37 @@ public static class ProxyLauncher
     // --- paths / helpers ---
 
     /// <summary>
-    /// Resolves the proxy state file path (<c>proxy.json</c>) next to the given telemetry.db. Public so
-    /// the interactive launch gate and tests can locate the advertised proxy's state file.
+    /// Resolves the proxy state file path for the default (Anthropic) provider: <c>proxy.json</c> next
+    /// to the given telemetry.db. Public so the interactive launch gate and tests can locate the
+    /// advertised proxy's state file.
     /// </summary>
     public static string StateFilePath(string telemetryDbPath)
     {
         var dir = Path.GetDirectoryName(Path.GetFullPath(telemetryDbPath)) ?? ".";
         return Path.Combine(dir, "proxy.json");
     }
+
+    /// <summary>
+    /// Resolves the provider-scoped proxy state file path next to the given telemetry.db:
+    /// <c>proxy.json</c> for <c>anthropic</c> (the default), <c>proxy.openai.json</c> for
+    /// <c>openai</c>. Both instances coexist in the same <c>.scope/</c> directory, each on a
+    /// distinct port, so attach/start never confuses an Anthropic proxy for an OpenAI one.
+    /// </summary>
+    public static string StateFilePath(string telemetryDbPath, string provider)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(telemetryDbPath)) ?? ".";
+        var fileName = string.Equals(provider, "openai", StringComparison.OrdinalIgnoreCase)
+            ? "proxy.openai.json"
+            : "proxy.json";
+        return Path.Combine(dir, fileName);
+    }
+
+    /// <summary>
+    /// Returns the default port for a provider: 5135 for Anthropic (the existing default) and 5136
+    /// for OpenAI. Using distinct ports lets both proxy instances coexist without coordination.
+    /// </summary>
+    private static int DefaultPortFor(string provider) =>
+        string.Equals(provider, "openai", StringComparison.OrdinalIgnoreCase) ? DefaultOpenAiPort : DefaultPort;
 
     /// <summary>
     /// Resolves the telemetry.db path the same way the proxy does: SCOPE_DB_PATH's

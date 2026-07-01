@@ -293,6 +293,26 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
             arguments.Add(request.Model);
         }
 
+        // Metered path: route /v1/responses through the OpenAI metering proxy via a custom Codex
+        // model_providers entry, verified on real Codex 0.141 traffic. Gated on BOTH a proxy URL
+        // AND an api key being present; missing either keeps the run on the direct un-metered path
+        // (ChatGPT-subscription / no-key case), mirroring InteractiveMeterGate's subscription
+        // carve-out. The env_key tells Codex to read the api key from CODEX_API_KEY, which
+        // BuildChildEnvironment sets explicitly for this run.
+        if (!string.IsNullOrWhiteSpace(request.ProxyBaseUrl) && !string.IsNullOrWhiteSpace(request.ApiKey))
+        {
+            arguments.Add("-c");
+            arguments.Add("model_provider=scope");
+            arguments.Add("-c");
+            arguments.Add("model_providers.scope.name=scope");
+            arguments.Add("-c");
+            arguments.Add($"model_providers.scope.base_url={request.ProxyBaseUrl}/v1");
+            arguments.Add("-c");
+            arguments.Add("model_providers.scope.wire_api=responses");
+            arguments.Add("-c");
+            arguments.Add($"model_providers.scope.env_key={ApiKeyEnvVar}");
+        }
+
         // Trailing '-' tells Codex to read the prompt from stdin.
         arguments.Add("-");
         return arguments;
@@ -308,9 +328,11 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
         if (!string.IsNullOrWhiteSpace(request.SessionKey))
             environment[SessionEnvVar] = request.SessionKey;
 
-        // ProxyBaseUrl is intentionally NOT mapped: Scope's metering proxy speaks the Anthropic
-        // wire protocol only, so pointing Codex at it would break the run. Codex runs un-metered
-        // (null wire cost, recorded honestly) until a second wire provider parser ships.
+        // OpenAI/Codex metering routing is done via -c model_providers flags injected by BuildArguments,
+        // api-key-gated (ProxyBaseUrl AND ApiKey must both be set). ProxyBaseUrl is NOT mapped to an
+        // env var for Codex: Codex uses a custom model_providers entry, not an OpenAI base-URL env var.
+        // Without both values the run is un-metered (direct path); the ChatGPT-subscription / no-key
+        // case stays exactly on the direct un-metered path, mirroring InteractiveMeterGate's carve-out.
         if (request.ProxyEnvironment is not null)
         {
             // Proxy wiring is non-destructive: pass provider vars through to the child verbatim.

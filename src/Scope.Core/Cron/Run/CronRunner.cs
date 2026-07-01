@@ -635,13 +635,59 @@ public sealed class CronRunner(
     /// wall-clock cutoff is resolved (per-agent override or global default); and the proxy base URL is
     /// budget-scoped so the proxy can refuse new calls at the budget. When no proxy is advertised, the
     /// budget scope is harmless (there is simply no proxy to gate) and the wall-clock guard still applies.
+    /// <para>
+    /// Provider-specific proxy wiring:
+    /// <list type="bullet">
+    ///   <item><b>Codex harness</b>: resolves the OpenAI proxy state from <c>proxy.openai.json</c> and
+    ///   reads <see cref="Launch.CodexHarnessLauncher.ApiKeyEnvVar"/> (<c>CODEX_API_KEY</c>) from the
+    ///   supervisor process environment. Both must be present for metered routing; missing either leaves
+    ///   the run un-metered (direct un-metered path -- ChatGPT-subscription / no-key case). The api-key
+    ///   gate mirrors <see cref="InteractiveMeterGate"/>'s subscription carve-out.</item>
+    ///   <item><b>All other harnesses (Claude Code, etc.)</b>: resolves the Anthropic proxy base URL
+    ///   from <c>proxy.json</c>; no explicit api key is set (it flows via the inherited parent
+    ///   environment, as it did before).</item>
+    /// </list>
+    /// </para>
     /// </summary>
     private HarnessLaunchRequest BuildLaunchRequest(CronAgentDefinition definition, string dispatchId, string sessionKey)
     {
         var artifactDir = BuildArtifactDirectory(definition.RepoPath, definition.Label);
-        var baseUrl = CronProxyEnvironment.TryResolveBaseUrl(scopeDirectory);
-        var scopedUrl = CronProxyEnvironment.WithBudgetScope(baseUrl, sessionKey, definition.TokenBudget);
         var effectiveMaxRuntime = CronRunawayGuard.EffectiveMaxRuntimeSeconds(definition.MaxRuntimeSeconds);
+
+        string? proxyBaseUrl;
+        string? apiKey = null;
+
+        if (string.Equals(definition.Harness, CronHarnesses.Codex, StringComparison.Ordinal))
+        {
+            // Codex: api-key-gated metering via the OpenAI proxy. Read CODEX_API_KEY from the
+            // supervisor env (never persisted; scoped to the child process by BuildChildEnvironment).
+            // If the key is absent (ChatGPT-subscription / no-key path) or no OpenAI proxy is
+            // advertised, ProxyBaseUrl stays null and the run executes un-metered.
+            var codexApiKey = Environment.GetEnvironmentVariable(Launch.CodexHarnessLauncher.ApiKeyEnvVar);
+            if (!string.IsNullOrWhiteSpace(codexApiKey))
+            {
+                var openAiBaseUrl = CronProxyEnvironment.TryResolveOpenAiBaseUrl(scopeDirectory);
+                if (openAiBaseUrl is not null)
+                {
+                    apiKey = codexApiKey;
+                    proxyBaseUrl = CronProxyEnvironment.WithBudgetScope(openAiBaseUrl, sessionKey, definition.TokenBudget);
+                }
+                else
+                {
+                    proxyBaseUrl = null; // no OpenAI proxy advertised -- un-metered
+                }
+            }
+            else
+            {
+                proxyBaseUrl = null; // no api key -- ChatGPT-subscription path, un-metered
+            }
+        }
+        else
+        {
+            // Claude Code and other harnesses: existing Anthropic proxy path (no explicit api key).
+            var baseUrl = CronProxyEnvironment.TryResolveBaseUrl(scopeDirectory);
+            proxyBaseUrl = CronProxyEnvironment.WithBudgetScope(baseUrl, sessionKey, definition.TokenBudget);
+        }
 
         return new HarnessLaunchRequest
         {
@@ -652,7 +698,8 @@ public sealed class CronRunner(
             Sandbox = HarnessSandbox.WorkspaceWrite,
             DispatchId = dispatchId,
             SessionKey = sessionKey,
-            ProxyBaseUrl = scopedUrl,
+            ProxyBaseUrl = proxyBaseUrl,
+            ApiKey = apiKey,
             TokenBudget = definition.TokenBudget,
             MaxRuntimeSeconds = effectiveMaxRuntime,
         };

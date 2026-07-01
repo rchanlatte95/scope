@@ -20,12 +20,15 @@ using Scope.Core.Telemetry;
 /// </summary>
 public static class CronProxyEnvironment
 {
-    /// <summary>The proxy state file name, relative to the workspace <c>.scope/</c> directory.</summary>
+    /// <summary>The Anthropic proxy state file name, relative to the workspace <c>.scope/</c> directory.</summary>
     public const string StateFileName = "proxy.json";
 
+    /// <summary>The OpenAI proxy state file name, relative to the workspace <c>.scope/</c> directory.</summary>
+    public const string OpenAiStateFileName = "proxy.openai.json";
+
     /// <summary>
-    /// Resolves the advertised proxy base URL given the workspace <c>.scope/</c> directory. Returns
-    /// null when no proxy state file is present or it cannot be parsed.
+    /// Resolves the advertised Anthropic proxy base URL given the workspace <c>.scope/</c> directory.
+    /// Returns null when no proxy state file is present or it cannot be parsed.
     /// </summary>
     public static string? TryResolveBaseUrl(string scopeDirectory)
     {
@@ -37,6 +40,27 @@ public static class CronProxyEnvironment
         catch
         {
             // Proxy wiring is best-effort: an unreadable state file means un-metered, never a crash.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the advertised OpenAI proxy base URL given the workspace <c>.scope/</c> directory,
+    /// reading from <c>proxy.openai.json</c> (the OpenAI-provider state file written by
+    /// <c>scope proxy run --provider openai</c> / <see cref="ProxyLauncher.EnsureProxyAsync"/> with
+    /// <c>provider = "openai"</c>). Returns null when no OpenAI proxy state file is present or it
+    /// cannot be parsed. Proxy wiring is best-effort: an absent or unreadable file means un-metered,
+    /// never a crash.
+    /// </summary>
+    public static string? TryResolveOpenAiBaseUrl(string scopeDirectory)
+    {
+        try
+        {
+            var stateFile = Path.Combine(scopeDirectory, OpenAiStateFileName);
+            return ProxyState.TryLoad(stateFile)?.BaseUrl;
+        }
+        catch
+        {
             return null;
         }
     }
