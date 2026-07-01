@@ -168,8 +168,11 @@ public sealed class CronRunner(
             }
 
             var (status, failureReason) = ClassifyOutcome(result, trip, definition, dispatchId);
+            // F2: pass self-reported usage and model so FinalizeRunBackgroundAsync can derive a
+            // provider_estimated cost when no wire calls were metered (Codex subscription path).
             var bgCostResult = await FinalizeRunBackgroundAsync(dbPath, capturedScopeDir, runId, dispatchId,
-                status, result.ExitCode, failureReason).ConfigureAwait(false);
+                status, result.ExitCode, failureReason,
+                result.Usage, request.Model).ConfigureAwait(false);
             // Backfill the cron session's cc_session_id from the host session id the harness reported
             // (result.ThreadId), now that the run has completed. The session row was created mid-run with
             // cc NULL; this is the universal-cc capture close (T-2026-06-19-04). Never throws; no-ops on
@@ -296,7 +299,10 @@ public sealed class CronRunner(
         var (status, failureReason) = ClassifyOutcome(result, trip, definition, dispatchId);
 
         // 7/8/9. Complete dispatch, fill cost from real metering only, update the run row.
-        var syncCostResult = FinalizeRun(runId, dispatchId, status, result.ExitCode, failureReason);
+        // F2: pass self-reported usage and model so FinalizeRun can derive a provider_estimated cost
+        // when no wire calls were metered (Codex subscription / no-api-key path).
+        var syncCostResult = FinalizeRun(runId, dispatchId, status, result.ExitCode, failureReason,
+            result.Usage, request.Model);
         // Backfill the cron session's cc_session_id from the host session id the harness reported
         // (result.ThreadId), regardless of `launched`: a session row exists from the origin stamp and a
         // captured host id is worth recording even on a non-launch outcome. Universal-cc capture close
@@ -317,8 +323,24 @@ public sealed class CronRunner(
     /// <see cref="CronService"/> (and its connection) -- suitable for the synchronous/blocking path.
     /// Returns the resolved <see cref="CronCostResult"/> so the caller can thread the pinned breakdown
     /// into the materialized span.
+    ///
+    /// F2 fallback: when the wire-exact join finds no metered calls (<see cref="CostProvenance.Unmetered"/>)
+    /// but the harness self-reported token usage in its event stream, this method derives a
+    /// <see cref="CostProvenance.ProviderEstimated"/> cost from those tokens via
+    /// <see cref="CronCostLookup.TryComputeSelfReportedEstimate"/>. This covers Codex runs launched
+    /// without the metering proxy (ChatGPT-subscription / no-api-key path). Wire-exact and already-estimated
+    /// results are never overwritten.
     /// </summary>
-    private CronCostResult FinalizeRun(string runId, string dispatchId, string status, int? exitCode, string? failureReason)
+    /// <param name="runId">The cron_runs row id to finalize.</param>
+    /// <param name="dispatchId">The dispatch id for wire-cost attribution.</param>
+    /// <param name="status">Terminal status string (completed, failed, ...).</param>
+    /// <param name="exitCode">Process exit code; null when the harness never started.</param>
+    /// <param name="failureReason">Human-readable failure detail; null on success.</param>
+    /// <param name="selfReportedUsage">Optional token counts from the harness event stream (F2 fallback source).</param>
+    /// <param name="model">Optional model id used to launch the run (F2 pricing key).</param>
+    private CronCostResult FinalizeRun(
+        string runId, string dispatchId, string status, int? exitCode, string? failureReason,
+        HarnessUsage? selfReportedUsage = null, string? model = null)
     {
         CompleteDispatchSafe(dispatchId);
 
@@ -330,6 +352,26 @@ public sealed class CronRunner(
         catch (Exception ex)
         {
             Log.Warning("Cron cost resolution failed (non-fatal): {ErrorMessage}", ex.Message);
+        }
+
+        // F2: when no wire calls were metered for this dispatch (Unmetered) but the harness reported
+        // token usage in its event stream, derive a provider_estimated cost from those span tokens.
+        // Only fires on Unmetered (proxy was not active): Unavailable (broken telemetry/pricing) and
+        // already-estimated results are intentionally left unchanged.
+        if (string.Equals(costResult.Provenance, CostProvenance.Unmetered, StringComparison.Ordinal)
+            && selfReportedUsage is not null
+            && !string.IsNullOrWhiteSpace(model))
+        {
+            try
+            {
+                var estimated = costLookup.TryComputeSelfReportedEstimate(model, selfReportedUsage);
+                if (!string.Equals(estimated.Provenance, CostProvenance.Unavailable, StringComparison.Ordinal))
+                    costResult = estimated;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("Cron self-reported estimate (F2) failed (non-fatal): {ErrorMessage}", ex.Message);
+            }
         }
 
         try
@@ -354,11 +396,15 @@ public sealed class CronRunner(
     /// Must-never-crash: all operations are wrapped; failures are logged only.
     /// Returns the resolved <see cref="CronCostResult"/> so the caller can thread the pinned
     /// breakdown into the materialized span.
+    ///
+    /// F2 fallback: mirrors <see cref="FinalizeRun"/> -- when the wire-exact join yields Unmetered
+    /// and self-reported usage is available, derives a provider_estimated cost from those tokens.
     /// </summary>
     private static async Task<CronCostResult> FinalizeRunBackgroundAsync(
         string dbPath, string capturedScopeDir,
         string runId, string dispatchId,
-        string status, int? exitCode, string? failureReason)
+        string status, int? exitCode, string? failureReason,
+        HarnessUsage? selfReportedUsage = null, string? model = null)
     {
         // Complete dispatch in observability writer (uses its own connection internally).
         try
@@ -376,6 +422,17 @@ public sealed class CronRunner(
         {
             var lookup = new CronCostLookup(Path.Combine(capturedScopeDir, "telemetry.db"));
             costResult = lookup.ResolveDispatchCost(dispatchId);
+
+            // F2: when no wire calls were metered (Unmetered) but the harness self-reported usage,
+            // derive a provider_estimated cost. Mirrors the sync FinalizeRun path exactly.
+            if (string.Equals(costResult.Provenance, CostProvenance.Unmetered, StringComparison.Ordinal)
+                && selfReportedUsage is not null
+                && !string.IsNullOrWhiteSpace(model))
+            {
+                var estimated = lookup.TryComputeSelfReportedEstimate(model, selfReportedUsage);
+                if (!string.Equals(estimated.Provenance, CostProvenance.Unavailable, StringComparison.Ordinal))
+                    costResult = estimated;
+            }
         }
         catch (Exception ex)
         {
