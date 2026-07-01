@@ -2,6 +2,7 @@ namespace Scope.Core.Cron.Run;
 
 using Microsoft.Data.Sqlite;
 using Scope.Core.CostEstimation;
+using Scope.Core.Cron.Launch;
 using Scope.Core.Telemetry;
 using Scope.Core.Telemetry.Trace;
 using Scope.Core.Utilities;
@@ -201,6 +202,103 @@ public sealed class CronCostLookup(string telemetryDbPath)
         {
             Log.Warning("Cron dispatch token read failed (non-fatal): {ErrorMessage}", ex.Message);
             return 0;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to estimate cost from self-reported span tokens when no wire-exact data is available.
+    /// This is the F2 fallback for Codex subscription/OAuth runs: Codex's own event stream reports
+    /// token usage in <c>usage</c> blocks (parsed by <see cref="CodexEventStreamParser"/>). Scope
+    /// prices those tokens via <see cref="ModelIdNormalizer"/> and the seed/external pricing table,
+    /// yielding <see cref="CostProvenance.ProviderEstimated"/> provenance.
+    ///
+    /// Token mapping (OpenAI-shaped usage, disjoint-bucket rules consistent with A3):
+    /// <list type="bullet">
+    ///   <item>cache_read = min(CachedInputTokens, InputTokens) (clamped; F4 over-count guard)</item>
+    ///   <item>net_input = max(0, InputTokens - cache_read) (disjoint: prompt minus what was cached)</item>
+    ///   <item>output = OutputTokens (reasoning tokens are included in output; no separate bucket)</item>
+    ///   <item>cache_creation = 0 (Codex/OpenAI does not report a cache-write fee)</item>
+    /// </list>
+    ///
+    /// Returns <see cref="CronCostResult.Unavailable"/> when:
+    /// <list type="bullet">
+    ///   <item><paramref name="modelId"/> is null/empty or unmappable by <see cref="ModelIdNormalizer"/>.</item>
+    ///   <item><paramref name="usage"/> is null or all token buckets are zero (no real tokens to price).</item>
+    /// </list>
+    /// Never throws; pricing or lookup failures are logged and degrade to Unavailable.
+    /// </summary>
+    /// <param name="modelId">The model id used for this run (e.g. from <see cref="HarnessLaunchRequest.Model"/>).</param>
+    /// <param name="usage">Self-reported token counts parsed from the harness event stream.</param>
+    public CronCostResult TryComputeSelfReportedEstimate(string? modelId, HarnessUsage? usage)
+    {
+        if (usage is null) return CronCostResult.Unavailable();
+        if (string.IsNullOrWhiteSpace(modelId)) return CronCostResult.Unavailable();
+
+        try
+        {
+            var inputRaw = usage.InputTokens ?? 0L;
+            var cachedRaw = usage.CachedInputTokens ?? 0L;
+
+            // Disjoint-bucket rules (F4 clamp: cached > input is bad data, clamp to input).
+            var cacheRead = Math.Min(cachedRaw, inputRaw);
+            var netInput = Math.Max(0L, inputRaw - cacheRead);
+            var output = usage.OutputTokens ?? 0L;
+            // Codex/OpenAI does not report a cache-write bucket; cache_creation is always zero.
+            const long cacheCreation = 0L;
+
+            // Guard: all buckets are zero -- nothing real to price, honest absence beats zero estimate.
+            if (netInput == 0L && output == 0L && cacheRead == 0L)
+                return CronCostResult.Unavailable();
+
+            var externalPricing = PricingResolver.TryResolve(
+                ResolveScopeDir(),
+                Environment.GetEnvironmentVariable("SCOPE_PRICING_PATH"));
+
+            var rate = ModelIdNormalizer.Lookup(modelId, externalPricing);
+            if (rate is null)
+            {
+                Log.Warning(
+                    "Cron self-reported estimate: model {Model} could not be mapped to any pricing entry; cost is unavailable.",
+                    modelId);
+                return CronCostResult.Unavailable();
+            }
+
+            var inRate = rate.InputUsdPerMillionTokens;
+            var outRate = rate.OutputUsdPerMillionTokens;
+            var cachedInRate = rate.CachedInputUsdPerMillionTokens ?? 0m;
+            var cacheCreateRate = rate.CacheCreationUsdPerMillionTokens ?? 0m;
+
+            var inputCost = CostEstimation.CostPricing.ComputeComponentCost(netInput, inRate);
+            var outputCost = CostEstimation.CostPricing.ComputeComponentCost(output, outRate);
+            // Cache-read: priced when the seed entry has a rate; absent rate yields 0 cost (not Unavailable).
+            // All OpenAI seed entries carry a cached-input rate (F5 compliance), so this is non-zero for
+            // all priceable Codex models that report cached tokens.
+            var cacheRdCost = (cacheRead > 0L && rate.CachedInputUsdPerMillionTokens.HasValue)
+                ? CostEstimation.CostPricing.ComputeComponentCost(cacheRead, cachedInRate) : 0m;
+            // cache_creation = 0 for Codex; cost is zero.
+            const decimal cacheWrCost = 0m;
+
+            var totalCost = inputCost + outputCost + cacheRdCost + cacheWrCost;
+
+            var pricesAsOf = CostEstimation.SeedPricingTable.ToSemanticDate(externalPricing?.PricesAsOf);
+
+            var components = new List<CostBreakdownComponent>
+            {
+                new("input",       netInput,      inRate,          inputCost),
+                new("output",      output,        outRate,         outputCost),
+                new("cache_read",  cacheRead,     cachedInRate,    cacheRdCost),
+                new("cache_write", cacheCreation, cacheCreateRate, cacheWrCost),
+            };
+            var breakdown = new CostBreakdown(rate.Id, pricesAsOf, Pinned: true, components, TotalUsd: totalCost);
+
+            // CronCostResult.Cost stays a double (persisted to cron_runs REAL + double DTOs); decimal is the
+            // exact source for the breakdown.
+            return CronCostResult.ProviderEstimated((double)totalCost, breakdown);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("Cron self-reported cost estimate failed (non-fatal): {ErrorMessage}", ex.Message);
+            return CronCostResult.Unavailable();
         }
     }
 
