@@ -300,23 +300,32 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
         // carve-out. The env_key tells Codex to read the api key from CODEX_API_KEY, which
         // BuildChildEnvironment sets explicitly for this run.
         if (!string.IsNullOrWhiteSpace(request.ProxyBaseUrl) && !string.IsNullOrWhiteSpace(request.ApiKey))
-        {
-            arguments.Add("-c");
-            arguments.Add("model_provider=scope");
-            arguments.Add("-c");
-            arguments.Add("model_providers.scope.name=scope");
-            arguments.Add("-c");
-            arguments.Add($"model_providers.scope.base_url={request.ProxyBaseUrl}/v1");
-            arguments.Add("-c");
-            arguments.Add("model_providers.scope.wire_api=responses");
-            arguments.Add("-c");
-            arguments.Add($"model_providers.scope.env_key={ApiKeyEnvVar}");
-        }
+            arguments.AddRange(BuildOpenAiMeteringArgs(request.ProxyBaseUrl));
 
         // Trailing '-' tells Codex to read the prompt from stdin.
         arguments.Add("-");
         return arguments;
     }
+
+    /// <summary>
+    /// Returns the 5 <c>-c</c> flag-pairs that route Codex's <c>/v1/responses</c> calls through the
+    /// Scope OpenAI metering proxy, verified on real Codex 0.141 traffic. The single source of truth
+    /// for both the cron (<see cref="BuildArguments"/>) and interactive (<c>InteractiveMeterGate</c>)
+    /// launch paths; changing this method propagates byte-identical flags to both paths.
+    /// </summary>
+    /// <param name="proxyBaseUrl">
+    /// Tokenized proxy base URL of the form <c>http://127.0.0.1:5136/t/{token}</c>. The method
+    /// appends <c>/v1</c> so the Codex <c>base_url</c> config entry points at the correct API root.
+    /// </param>
+    public static IReadOnlyList<string> BuildOpenAiMeteringArgs(string proxyBaseUrl)
+        =>
+        [
+            "-c", "model_provider=scope",
+            "-c", "model_providers.scope.name=scope",
+            "-c", $"model_providers.scope.base_url={proxyBaseUrl}/v1",
+            "-c", "model_providers.scope.wire_api=responses",
+            "-c", $"model_providers.scope.env_key={ApiKeyEnvVar}",
+        ];
 
     private static Dictionary<string, string> BuildChildEnvironment(HarnessLaunchRequest request)
     {

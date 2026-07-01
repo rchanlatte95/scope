@@ -25,19 +25,35 @@ public sealed record InteractiveLaunchResult(
 /// platform-independence rule) plus the values to set in the CHILD environment only: the tokenized
 /// proxy base URL and, optionally, the API key to route explicitly. The launcher stays
 /// harness-agnostic; only the caller's gate decides whether to supply this and which adapter constants
-/// to source the names from. When supplied, the child env gains <see cref="BaseUrlEnvVar"/>; when
-/// <see cref="ApiKeyEnvVar"/> and <see cref="ApiKey"/> are both non-empty, the key is set explicitly,
-/// otherwise the key is left to flow through the inherited parent environment unchanged.
+/// to source the names from.
+/// <para>
+/// <see cref="BaseUrlEnvVar"/> and <see cref="BaseUrl"/> are optional. When both are provided, the
+/// child env gains the proxy base-URL env var (e.g. <c>ANTHROPIC_BASE_URL</c> for Claude). When
+/// omitted (null), no base-URL env var is set — the Codex path uses this because it routes via
+/// <see cref="ExtraArgs"/> <c>-c model_providers</c> flags instead of a base-URL env var.
+/// </para>
+/// <para>
+/// When <see cref="ApiKeyEnvVar"/> and <see cref="ApiKey"/> are both non-empty, the key is set
+/// explicitly in the child env; otherwise the key is left to flow through the inherited parent
+/// environment unchanged.
+/// </para>
+/// <para>
+/// <see cref="ExtraArgs"/> are prepended to the user's passthrough arguments before the harness is
+/// launched. Used by the Codex path to inject <c>-c model_providers.scope.*</c> flags that route
+/// <c>/v1/responses</c> through the Scope metering proxy without touching any env var.
+/// </para>
 /// </summary>
-/// <param name="BaseUrlEnvVar">Host adapter's proxy base-url env-var name (e.g. <c>ANTHROPIC_BASE_URL</c>).</param>
-/// <param name="BaseUrl">Tokenized proxy base URL the child must call (<c>http://127.0.0.1:{port}/t/{token}</c>).</param>
+/// <param name="BaseUrlEnvVar">Host adapter's proxy base-url env-var name (e.g. <c>ANTHROPIC_BASE_URL</c>), or null when the harness routes via args instead of an env var.</param>
+/// <param name="BaseUrl">Tokenized proxy base URL the child must call (<c>http://127.0.0.1:{port}/t/{token}</c>), or null when unused.</param>
 /// <param name="ApiKeyEnvVar">Host adapter's API-key env-var name (e.g. <c>ANTHROPIC_API_KEY</c>), or null to inherit the key from the parent env unchanged.</param>
 /// <param name="ApiKey">API key value to set explicitly, or null to inherit the parent env unchanged.</param>
+/// <param name="ExtraArgs">Extra arguments prepended to the user passthrough args at launch (e.g. Codex <c>-c model_providers.*</c> flags). Null or empty means no prepend.</param>
 public sealed record InteractiveProxyWiring(
-    string BaseUrlEnvVar,
-    string BaseUrl,
+    string? BaseUrlEnvVar = null,
+    string? BaseUrl = null,
     string? ApiKeyEnvVar = null,
-    string? ApiKey = null);
+    string? ApiKey = null,
+    IReadOnlyList<string>? ExtraArgs = null);
 
 /// <summary>
 /// Launches an agent harness (Claude Code or Codex) INTERACTIVELY as a transparent passthrough for
@@ -180,17 +196,29 @@ public sealed class InteractiveHarnessLauncher
             [SessionEnvVar] = sessionKey,
         };
 
-        // Optional metering wiring: route the child through the Scope wire-metering proxy by setting
-        // the host adapter's base-url env var (and, when given, the API key) in the CHILD env only. The
-        // env-var NAMES come from the caller's host adapter constants, so no provider string is
-        // hardcoded here. When proxyWiring is null this block is skipped and the child env stays
-        // byte-identical to the un-metered subscription path.
+        // Optional metering wiring: route the child through the Scope wire-metering proxy. Env-var
+        // NAMES come from the caller's host adapter constants so no provider string is hardcoded here.
+        // When proxyWiring is null this block is skipped and the child env stays byte-identical to the
+        // un-metered subscription path.
+        //
+        // BaseUrlEnvVar is nullable: Claude supplies ANTHROPIC_BASE_URL; Codex routes via -c flags
+        // (ExtraArgs) instead and leaves BaseUrlEnvVar null — so the guard skips the env-var write.
         if (proxyWiring is not null)
         {
-            environment[proxyWiring.BaseUrlEnvVar] = proxyWiring.BaseUrl;
+            var baseUrlEnvVar = proxyWiring.BaseUrlEnvVar;
+            if (!string.IsNullOrEmpty(baseUrlEnvVar))
+                environment[baseUrlEnvVar] = proxyWiring.BaseUrl ?? "";
             if (!string.IsNullOrWhiteSpace(proxyWiring.ApiKeyEnvVar) && !string.IsNullOrWhiteSpace(proxyWiring.ApiKey))
                 environment[proxyWiring.ApiKeyEnvVar] = proxyWiring.ApiKey;
         }
+
+        // ExtraArgs from wiring are prepended to the user's passthrough args before launch. Used by
+        // the Codex metered path to inject -c model_providers.scope.* flags that route /v1/responses
+        // through the Scope OpenAI proxy without touching any env var. Claude wiring sets ExtraArgs to
+        // null, leaving the passthrough byte-identical to the un-metered path.
+        IReadOnlyList<string> effectiveArgs = proxyWiring?.ExtraArgs is { Count: > 0 } extraArgs
+            ? [..extraArgs, ..passthroughArgs]
+            : passthroughArgs;
 
         // A Windows .cmd shim must be launched through cmd.exe with the caller owning quoting; a
         // direct image uses ArgumentList. ExecutableResolver/ResolvedExecutable own this platform
@@ -198,11 +226,11 @@ public sealed class InteractiveHarnessLauncher
         InteractiveProcessRunRequest runRequest;
         try
         {
-            var rawArguments = resolved.BuildCmdRawArguments(passthroughArgs);
+            var rawArguments = resolved.BuildCmdRawArguments(effectiveArgs);
             runRequest = new InteractiveProcessRunRequest
             {
                 FileName = resolved.LaunchFileName,
-                Arguments = rawArguments is null ? passthroughArgs : [],
+                Arguments = rawArguments is null ? effectiveArgs : [],
                 RawArgumentString = rawArguments,
                 WorkingDirectory = workingDirectory ?? Directory.GetCurrentDirectory(),
                 Environment = environment,
