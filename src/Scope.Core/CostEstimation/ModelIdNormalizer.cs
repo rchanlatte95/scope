@@ -140,6 +140,73 @@ public static class ModelIdNormalizer
     }
 
     /// <summary>
+    /// Looks up a <see cref="ModelPricing"/> entry for <paramref name="rawModelId"/> from
+    /// <paramref name="externalConfig"/> ONLY - no seed-table fallback. Matches by the raw id
+    /// OR by the normalized key (<see cref="Normalize"/>), <c>OrdinalIgnoreCase</c>, mirroring
+    /// the external branch of <see cref="Lookup"/> exactly. Returns <c>null</c> when
+    /// <paramref name="externalConfig"/> is <c>null</c>, when <paramref name="rawModelId"/>
+    /// cannot be normalized (unknown model family), or when no model in the external config
+    /// matches either the raw id or the normalized key.
+    ///
+    /// This method exists to enforce the provenance invariant: a wire-exact cost labeled
+    /// <see cref="Scope.Core.Cron.Run.CostProvenance.JoinedExact"/> must only be priced from
+    /// the operator-supplied external table, NEVER from the built-in seed table. Callers that
+    /// need a seed-table fallback should use <see cref="Lookup"/> instead and accept
+    /// <see cref="Scope.Core.Cron.Run.CostProvenance.ProviderEstimated"/> provenance.
+    ///
+    /// Matching is <b>verbatim-first</b> (most-specific wins), in TWO passes over
+    /// <paramref name="externalConfig"/>'s models:
+    /// <list type="number">
+    ///   <item>First pass: return the first entry whose id equals <paramref name="rawModelId"/>
+    ///     verbatim (<c>OrdinalIgnoreCase</c>). This is deterministic "most-specific wins": if a
+    ///     config carries both a base entry (e.g. <c>gpt-5</c>) and a more-specific dated entry
+    ///     (e.g. <c>gpt-5.5-2026-04-23</c>), a wire id of <c>gpt-5.5-2026-04-23</c> resolves to the
+    ///     dated entry regardless of list order.</item>
+    ///   <item>Second pass (only if no verbatim match): return the first entry whose id equals the
+    ///     normalized key (<see cref="Normalize"/>) when normalization succeeds
+    ///     (<c>OrdinalIgnoreCase</c>). This is the family-base fallback (e.g. wire
+    ///     <c>gpt-5.5-2026-04-23</c> -> base <c>gpt-5</c>).</item>
+    /// </list>
+    /// A raw id that <see cref="Normalize"/> cannot map (not in the prefix map, e.g. an
+    /// operator-defined <c>claude-x</c>) still verbatim-matches in the first pass.
+    /// </summary>
+    /// <param name="rawModelId">The observed model id from telemetry (e.g. <c>wire_calls.model</c>).</param>
+    /// <param name="externalConfig">
+    /// Operator-supplied pricing config (from local pricing.json or the LiteLLM cache). When
+    /// <c>null</c>, returns <c>null</c> immediately.
+    /// </param>
+    public static ModelPricing? LookupExternalOnly(string? rawModelId, ModelPricingConfig? externalConfig)
+    {
+        if (externalConfig is null) return null;
+        if (string.IsNullOrWhiteSpace(rawModelId)) return null;
+
+        // Pass 1 (verbatim, most-specific wins): the operator's pricing.json carries the exact
+        // wire id. Allowed for all models, including those not in the prefix map. This precedes
+        // the normalized-base fallback so a specific dated entry always beats its family base,
+        // regardless of list order.
+        foreach (var m in externalConfig.Models)
+        {
+            if (StringComparer.OrdinalIgnoreCase.Equals(m.Id, rawModelId))
+                return m;
+        }
+
+        // Pass 2 (normalized-base fallback): the pricing.json carries the family base entry
+        // (e.g. "gpt-5") and the wire id is a datestamped or versioned variant
+        // (e.g. "gpt-5.5-2026-04-23"). Only attempted when normalization succeeds (key non-null).
+        var key = Normalize(rawModelId);
+        if (key is not null)
+        {
+            foreach (var m in externalConfig.Models)
+            {
+                if (StringComparer.OrdinalIgnoreCase.Equals(m.Id, key))
+                    return m;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Looks up a <see cref="ModelPricing"/> entry for <paramref name="rawModelId"/> by first
     /// normalizing the id, then searching a caller-supplied config (operator-override), then
     /// falling back to the built-in <see cref="SeedPricingTable.Config"/>. Returns null when
