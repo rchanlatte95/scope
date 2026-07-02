@@ -42,6 +42,7 @@ import Snippet from '../components/Snippet';
 import Tooltip from '../components/Tooltip';
 import ScrollToTop from '../components/ScrollToTop';
 import { toCostProvenance } from '../lib/provenance';
+import { SkeletonPanel, SkeletonBlock } from '../components/Skeleton';
 import { SessionPicker, type PickerTab } from '../components/SessionPicker';
 import TraceSummaryPanel from '../components/TraceSummaryPanel';
 import {
@@ -1142,127 +1143,139 @@ export default function TraceView({ initialSession = null, initialHighlightRef =
 
           {/* Trace layout: graph ABOVE timeline on all widths (owner, 2026-06-13). */}
           <div className={styles.traceLayout}>
-            {/* Graph section (left / top): overview of who calls what. */}
-            {graph != null && graph.nodes.length > 0 && (
-              <div className={styles.graphSection}>
-                <span className={styles.graphLabel}>Session graph</span>
-                <SessionGraph
-                  nodes={graph.nodes}
-                  edges={graph.edges}
-                  highlightId={highlightId}
-                  onSelect={onGraphSelect}
-                />
-              </div>
-            )}
-
-            {/* Timeline section: authoritative chronological evidence (non-graph equivalent). */}
-            <div className={styles.timelineSection}>
-              <div className={styles.timelineHeader}>
-                <span className={styles.timelineLabel}>
-                  Event timeline · {eventsTotalCount > 0 ? `${String(eventsTotalCount)} entries total` : `${String(entries.length)} entries`}
-                </span>
-                <RefreshControl autoRefresh={autoRefresh} className={styles.timelineRefreshControl ?? ''} />
-              </div>
-              {traceError != null && traceError !== '' && <p className={styles.error}>Failed to load trace: {traceError}</p>}
-
-              {/* Pagination: shown when server reports total_count (newer server). */}
-              {computePageCount(eventsTotalCount, eventsPageState.pageSize) > 0 && (
-                <Pagination
-                  page={eventsPageState.page}
-                  pageCount={eventsPageState.pageCount}
-                  pageSize={eventsPageState.pageSize}
-                  totalCount={eventsTotalCount}
-                  onGoToPage={eventsPageActions.goToPage}
-                  onPrevPage={eventsPageActions.prevPage}
-                  onNextPage={eventsPageActions.nextPage}
-                  onSetPageSize={eventsPageActions.setPageSize}
-                  label="Event timeline pagination"
-                  className={styles.timelinePagination ?? ''}
-                />
-              )}
-
-              {entries.length > 0 && (
-                <div className={styles.timelineUtility}>
-                  <span className={styles.timelineUtilityLabel}>Row details</span>
-                  <div className={styles.timelineBulkControls} role="group" aria-label="Event timeline row detail controls">
-                    <button
-                      type="button"
-                      className={styles.timelineBulkButton}
-                      onClick={openAllTimelineDetails}
-                    >
-                      <span className={styles.timelineBulkSymbol} aria-hidden="true">v</span>
-                      <span>Open all</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.timelineBulkButton}
-                      onClick={collapseAllTimelineDetails}
-                    >
-                      <span className={styles.timelineBulkSymbol} aria-hidden="true">-</span>
-                      <span>Collapse all</span>
-                    </button>
+            {loadingTrace ? (
+              // Reserves the graph-above-timeline layout while the graph + first
+              // trace page are in flight (bootstrap sessions query already resolved,
+              // a session is selected, but graph/trace data has not arrived yet).
+              <SkeletonPanel label="Loading trace">
+                <SkeletonBlock height={220} />
+                <SkeletonBlock height={360} />
+              </SkeletonPanel>
+            ) : (
+              <>
+                {/* Graph section (left / top): overview of who calls what. */}
+                {graph != null && graph.nodes.length > 0 && (
+                  <div className={styles.graphSection}>
+                    <span className={styles.graphLabel}>Session graph</span>
+                    <SessionGraph
+                      nodes={graph.nodes}
+                      edges={graph.edges}
+                      highlightId={highlightId}
+                      onSelect={onGraphSelect}
+                    />
                   </div>
-                </div>
-              )}
+                )}
 
-              {entries.length > 0 ? (
-                <EvidenceTable<TraceEntry>
-                  caption="Event timeline"
-                  columns={timelineColumns}
-                  rows={entries}
-                  getRowKey={(row) => row.id}
-                  onRowClick={onTimelineRowClick}
-                  useRowButtonRole={false}
-                  getRowClassName={(row, idx) => [
-                    styles.timelineEventRow,
-                    idx % 2 === 1 ? styles.timelineEventRowAlt : '',
-                    expandedRowIds.has(row.id) ? styles.timelineEventRowExpanded : '',
-                    row.id === highlightId ? styles.timelineRowSelected : '',
-                    isUserSubmitEntry(row) && isInitiatingSubmit(row.user_submit_subtype) ? styles.timelineInitiatingRow : '',
-                  ].filter(Boolean).join(' ')}
-                  getRowStyle={(row) => ({
-                    '--event-color': `var(${TOOL_TYPE_TOKEN[getEntryToolType(row)]})`,
-                  } as React.CSSProperties)}
-                  getRowAriaExpanded={(row) => expandedRowIds.has(row.id)}
-                  getRowDataAttrs={(row) => {
-                    const attrs: Record<string, string> = {};
-                    if (isUserSubmitEntry(row)) {
-                      attrs['data-user-submit'] = 'true';
-                      const isInit = isInitiatingSubmit(row.user_submit_subtype);
-                      if (isInit) attrs['data-initiating'] = 'true';
-                      // Note: descriptive text for screen readers is provided by the
-                      // sr-only span inside the Type cell (toolType column render),
-                      // not by aria-label on the <tr>. aria-label on role=row has
-                      // inconsistent AT support across browsers/screen-reader combos.
-                    }
-                    return Object.keys(attrs).length > 0 ? attrs : undefined;
-                  }}
-                  renderRowAfter={(row, idx) => {
-                    if (!expandedRowIds.has(row.id)) return null;
-                    return (
-                      <tr
-                        key={`${row.id}-detail`}
-                        className={[
-                          styles.timelineDetailRow,
-                          idx % 2 === 1 ? styles.timelineDetailRowAlt : '',
-                        ].filter(Boolean).join(' ')}
-                        style={{
-                          '--event-color': `var(${TOOL_TYPE_TOKEN[getEntryToolType(row)]})`,
-                        } as React.CSSProperties}
-                      >
-                        <td colSpan={TIMELINE_COLUMN_COUNT}>
-                          <TraceEntryInlineDetail entry={row} zone={resolvedZone} />
-                        </td>
-                      </tr>
-                    );
-                  }}
-                />
-              ) : (
-                !loadingTrace && (traceError == null || traceError === '') && (
-                  <p className={styles.notice}>No entries recorded in this session.</p>
-                )
-              )}
-            </div>
+                {/* Timeline section: authoritative chronological evidence (non-graph equivalent). */}
+                <div className={styles.timelineSection}>
+                  <div className={styles.timelineHeader}>
+                    <span className={styles.timelineLabel}>
+                      Event timeline · {eventsTotalCount > 0 ? `${String(eventsTotalCount)} entries total` : `${String(entries.length)} entries`}
+                    </span>
+                    <RefreshControl autoRefresh={autoRefresh} className={styles.timelineRefreshControl ?? ''} />
+                  </div>
+                  {traceError != null && traceError !== '' && <p className={styles.error}>Failed to load trace: {traceError}</p>}
+
+                  {/* Pagination: shown when server reports total_count (newer server). */}
+                  {computePageCount(eventsTotalCount, eventsPageState.pageSize) > 0 && (
+                    <Pagination
+                      page={eventsPageState.page}
+                      pageCount={eventsPageState.pageCount}
+                      pageSize={eventsPageState.pageSize}
+                      totalCount={eventsTotalCount}
+                      onGoToPage={eventsPageActions.goToPage}
+                      onPrevPage={eventsPageActions.prevPage}
+                      onNextPage={eventsPageActions.nextPage}
+                      onSetPageSize={eventsPageActions.setPageSize}
+                      label="Event timeline pagination"
+                      className={styles.timelinePagination ?? ''}
+                    />
+                  )}
+
+                  {entries.length > 0 && (
+                    <div className={styles.timelineUtility}>
+                      <span className={styles.timelineUtilityLabel}>Row details</span>
+                      <div className={styles.timelineBulkControls} role="group" aria-label="Event timeline row detail controls">
+                        <button
+                          type="button"
+                          className={styles.timelineBulkButton}
+                          onClick={openAllTimelineDetails}
+                        >
+                          <span className={styles.timelineBulkSymbol} aria-hidden="true">v</span>
+                          <span>Open all</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.timelineBulkButton}
+                          onClick={collapseAllTimelineDetails}
+                        >
+                          <span className={styles.timelineBulkSymbol} aria-hidden="true">-</span>
+                          <span>Collapse all</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {entries.length > 0 ? (
+                    <EvidenceTable<TraceEntry>
+                      caption="Event timeline"
+                      columns={timelineColumns}
+                      rows={entries}
+                      getRowKey={(row) => row.id}
+                      onRowClick={onTimelineRowClick}
+                      useRowButtonRole={false}
+                      getRowClassName={(row, idx) => [
+                        styles.timelineEventRow,
+                        idx % 2 === 1 ? styles.timelineEventRowAlt : '',
+                        expandedRowIds.has(row.id) ? styles.timelineEventRowExpanded : '',
+                        row.id === highlightId ? styles.timelineRowSelected : '',
+                        isUserSubmitEntry(row) && isInitiatingSubmit(row.user_submit_subtype) ? styles.timelineInitiatingRow : '',
+                      ].filter(Boolean).join(' ')}
+                      getRowStyle={(row) => ({
+                        '--event-color': `var(${TOOL_TYPE_TOKEN[getEntryToolType(row)]})`,
+                      } as React.CSSProperties)}
+                      getRowAriaExpanded={(row) => expandedRowIds.has(row.id)}
+                      getRowDataAttrs={(row) => {
+                        const attrs: Record<string, string> = {};
+                        if (isUserSubmitEntry(row)) {
+                          attrs['data-user-submit'] = 'true';
+                          const isInit = isInitiatingSubmit(row.user_submit_subtype);
+                          if (isInit) attrs['data-initiating'] = 'true';
+                          // Note: descriptive text for screen readers is provided by the
+                          // sr-only span inside the Type cell (toolType column render),
+                          // not by aria-label on the <tr>. aria-label on role=row has
+                          // inconsistent AT support across browsers/screen-reader combos.
+                        }
+                        return Object.keys(attrs).length > 0 ? attrs : undefined;
+                      }}
+                      renderRowAfter={(row, idx) => {
+                        if (!expandedRowIds.has(row.id)) return null;
+                        return (
+                          <tr
+                            key={`${row.id}-detail`}
+                            className={[
+                              styles.timelineDetailRow,
+                              idx % 2 === 1 ? styles.timelineDetailRowAlt : '',
+                            ].filter(Boolean).join(' ')}
+                            style={{
+                              '--event-color': `var(${TOOL_TYPE_TOKEN[getEntryToolType(row)]})`,
+                            } as React.CSSProperties}
+                          >
+                            <td colSpan={TIMELINE_COLUMN_COUNT}>
+                              <TraceEntryInlineDetail entry={row} zone={resolvedZone} />
+                            </td>
+                          </tr>
+                        );
+                      }}
+                    />
+                  ) : (
+                    (traceError == null || traceError === '') && (
+                      <p className={styles.notice}>No entries recorded in this session.</p>
+                    )
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
