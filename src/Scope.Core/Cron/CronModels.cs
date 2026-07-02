@@ -115,6 +115,13 @@ public sealed record CronEditableFields(
 
 /// <summary>
 /// Persisted execution row for a cron-agent run.
+/// <para>
+/// <c>MeteringMisconfigured</c> (schema v7): true when metering was expected (proxy and api-key
+/// both set at launch) but the final resolved provenance is still <c>unmetered</c> after the F2
+/// self-reported fallback. NULL in the database reads back as <c>false</c> for historical rows.
+/// Never set for <c>joined_exact</c>, <c>provider_estimated</c>, <c>unavailable</c>, or honest
+/// no-proxy <c>unmetered</c> runs.
+/// </para>
 /// </summary>
 public sealed record CronRunRecord(
     string Id,
@@ -128,7 +135,8 @@ public sealed record CronRunRecord(
     double? TotalCostUsd,
     string? SkipReason,
     string? ErrorMessage,
-    string? CostProvenance = null);
+    string? CostProvenance = null,
+    bool MeteringMisconfigured = false);
 
 /// <summary>
 /// Input for writing a cron-agent run record.

@@ -124,6 +124,11 @@ public sealed class CronRunner(
         // Build the launch request up-front so it can be captured by the continuation Task.
         var request = BuildLaunchRequest(definition, dispatchId, sessionKey);
 
+        // F6: derive whether metering was expected for this run. Mirrors the gate in BuildLaunchRequest:
+        // metering is expected when both a proxy base-url and an api-key were set on the request.
+        // Captured here (before the lambda) so it is available to FinalizeRunBackgroundAsync.
+        var meteringExpected = request.ProxyBaseUrl is not null && request.ApiKey is not null;
+
         var launcher = registry.Resolve(definition.Harness);
         if (launcher is null)
         {
@@ -170,9 +175,10 @@ public sealed class CronRunner(
             var (status, failureReason) = ClassifyOutcome(result, trip, definition, dispatchId);
             // F2: pass self-reported usage and model so FinalizeRunBackgroundAsync can derive a
             // provider_estimated cost when no wire calls were metered (Codex subscription path).
+            // F6: pass meteringExpected so the misconfiguration flag is set when applicable.
             var bgCostResult = await FinalizeRunBackgroundAsync(dbPath, capturedScopeDir, runId, dispatchId,
                 status, result.ExitCode, failureReason,
-                result.Usage, request.Model).ConfigureAwait(false);
+                result.Usage, request.Model, meteringExpected).ConfigureAwait(false);
             // Backfill the cron session's cc_session_id from the host session id the harness reported
             // (result.ThreadId), now that the run has completed. The session row was created mid-run with
             // cc NULL; this is the universal-cc capture close (T-2026-06-19-04). Never throws; no-ops on
@@ -254,6 +260,12 @@ public sealed class CronRunner(
         //    and a budget-scoped proxy URL so the proxy can refuse new calls at the budget).
         var request = BuildLaunchRequest(definition, dispatchId, sessionKey);
 
+        // F6: derive whether metering was expected for this run. Mirrors the gate in BuildLaunchRequest:
+        // metering is expected when both a proxy base-url and an api-key were set on the request.
+        // Passed to FinalizeRun so the misconfiguration flag can be set when metering was expected
+        // but the final provenance is still Unmetered after F2.
+        var meteringExpected = request.ProxyBaseUrl is not null && request.ApiKey is not null;
+
         // 5. Resolve the launcher for the harness.
         var launcher = registry.Resolve(definition.Harness);
         if (launcher is null)
@@ -301,8 +313,9 @@ public sealed class CronRunner(
         // 7/8/9. Complete dispatch, fill cost from real metering only, update the run row.
         // F2: pass self-reported usage and model so FinalizeRun can derive a provider_estimated cost
         // when no wire calls were metered (Codex subscription / no-api-key path).
+        // F6: pass meteringExpected so the misconfiguration flag is set when applicable.
         var syncCostResult = FinalizeRun(runId, dispatchId, status, result.ExitCode, failureReason,
-            result.Usage, request.Model);
+            result.Usage, request.Model, meteringExpected);
         // Backfill the cron session's cc_session_id from the host session id the harness reported
         // (result.ThreadId), regardless of `launched`: a session row exists from the origin stamp and a
         // captured host id is worth recording even on a non-launch outcome. Universal-cc capture close
@@ -330,6 +343,12 @@ public sealed class CronRunner(
     /// <see cref="CronCostLookup.TryComputeSelfReportedEstimate"/>. This covers Codex runs launched
     /// without the metering proxy (ChatGPT-subscription / no-api-key path). Wire-exact and already-estimated
     /// results are never overwritten.
+    ///
+    /// F6 flag: when <paramref name="meteringExpected"/> is true (proxy and api-key were both set for
+    /// this run) AND the FINAL resolved provenance is still <see cref="CostProvenance.Unmetered"/> after
+    /// the F2 fallback, a <c>metering_misconfigured</c> flag is persisted and a distinct
+    /// <see cref="Log.Warning"/> is emitted. Never fires for <c>joined_exact</c>,
+    /// <c>provider_estimated</c>, <c>unavailable</c>, or honest no-proxy <c>unmetered</c>.
     /// </summary>
     /// <param name="runId">The cron_runs row id to finalize.</param>
     /// <param name="dispatchId">The dispatch id for wire-cost attribution.</param>
@@ -338,9 +357,10 @@ public sealed class CronRunner(
     /// <param name="failureReason">Human-readable failure detail; null on success.</param>
     /// <param name="selfReportedUsage">Optional token counts from the harness event stream (F2 fallback source).</param>
     /// <param name="model">Optional model id used to launch the run (F2 pricing key).</param>
+    /// <param name="meteringExpected">True when the launch request had both ProxyBaseUrl and ApiKey set.</param>
     private CronCostResult FinalizeRun(
         string runId, string dispatchId, string status, int? exitCode, string? failureReason,
-        HarnessUsage? selfReportedUsage = null, string? model = null)
+        HarnessUsage? selfReportedUsage = null, string? model = null, bool meteringExpected = false)
     {
         CompleteDispatchSafe(dispatchId);
 
@@ -374,9 +394,22 @@ public sealed class CronRunner(
             }
         }
 
+        // F6: flag metering misconfiguration when proxy+api-key were set but no wire calls
+        // were attributed. NEVER fires for joined_exact, provider_estimated, unavailable,
+        // or honest no-proxy unmetered. Only fires when the FINAL provenance is still Unmetered
+        // after F2 (i.e., F2 did not upgrade it to provider_estimated).
+        var isMisconfigured = meteringExpected
+            && string.Equals(costResult.Provenance, CostProvenance.Unmetered, StringComparison.Ordinal);
+        if (isMisconfigured)
+            Log.Warning(
+                "Cron run {RunId}: metering was expected (proxy and api-key were set) but no wire " +
+                "calls were attributed to this dispatch. Check proxy connectivity and api-key validity.",
+                runId);
+
         try
         {
-            var update = service.CompleteRun(runId, status, exitCode, costResult.Cost, failureReason, costResult.Provenance);
+            var update = service.CompleteRun(runId, status, exitCode, costResult.Cost, failureReason,
+                costResult.Provenance, isMisconfigured);
             if (!update.Success)
                 Log.Warning("Cron run completion update failed (non-fatal): {Error}", update.Error);
         }
@@ -399,12 +432,16 @@ public sealed class CronRunner(
     ///
     /// F2 fallback: mirrors <see cref="FinalizeRun"/> -- when the wire-exact join yields Unmetered
     /// and self-reported usage is available, derives a provider_estimated cost from those tokens.
+    ///
+    /// F6 flag: when <paramref name="meteringExpected"/> is true AND the FINAL provenance is still
+    /// Unmetered after F2, persists the metering_misconfigured flag and emits a Warning. Mirrors
+    /// <see cref="FinalizeRun"/> exactly.
     /// </summary>
     private static async Task<CronCostResult> FinalizeRunBackgroundAsync(
         string dbPath, string capturedScopeDir,
         string runId, string dispatchId,
         string status, int? exitCode, string? failureReason,
-        HarnessUsage? selfReportedUsage = null, string? model = null)
+        HarnessUsage? selfReportedUsage = null, string? model = null, bool meteringExpected = false)
     {
         // Complete dispatch in observability writer (uses its own connection internally).
         try
@@ -439,13 +476,26 @@ public sealed class CronRunner(
             Log.Warning("Cron background cost resolution failed (non-fatal): {ErrorMessage}", ex.Message);
         }
 
+        // F6: flag metering misconfiguration when proxy+api-key were set but no wire calls
+        // were attributed. NEVER fires for joined_exact, provider_estimated, unavailable,
+        // or honest no-proxy unmetered. Only fires when the FINAL provenance is still Unmetered
+        // after F2 (i.e., F2 did not upgrade it to provider_estimated).
+        var isMisconfigured = meteringExpected
+            && string.Equals(costResult.Provenance, CostProvenance.Unmetered, StringComparison.Ordinal);
+        if (isMisconfigured)
+            Log.Warning(
+                "Cron run {RunId}: metering was expected (proxy and api-key were set) but no wire " +
+                "calls were attributed to this dispatch. Check proxy connectivity and api-key validity.",
+                runId);
+
         try
         {
 #pragma warning disable MA0004 // await using SqliteConnection: DisposeAsync is sync-safe; inner await already has ConfigureAwait(false)
             await using var conn = await SQLite.OpenDbAsync(dbPath, CancellationToken.None).ConfigureAwait(false);
 #pragma warning restore MA0004
             var backgroundService = new CronService(new CronRepository(conn));
-            var update = backgroundService.CompleteRun(runId, status, exitCode, costResult.Cost, failureReason, costResult.Provenance);
+            var update = backgroundService.CompleteRun(runId, status, exitCode, costResult.Cost, failureReason,
+                costResult.Provenance, isMisconfigured);
             if (!update.Success)
                 Log.Warning("Cron background run completion update failed (non-fatal): {Error}", update.Error);
         }
