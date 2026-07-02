@@ -156,6 +156,26 @@ export default function CommandView() {
     to: traceWindowTo.toISOString(),
   });
 
+  // -- "7-day spend" card reconciliation (T-2026-06-16-08 finding 3, R4 deep-link
+  //    convention) ------------------------------------------------------------
+  // The card's total_spend_usd is a rolling 7-day window ending at request time
+  // (BuildBudgetSummary -> CostAggregator.CostWindow.Last7Days() -> Rolling(7),
+  // ScopeApp.Command.cs; anchored on the server's UtcNow at request time).
+  // CostLedgerView's own default window is 30 days (DEFAULT_DATE_RANGE), so a bare
+  // `#/cost-ledger` link would silently swap the 7d headline for a larger 30d one.
+  // Mirrors the traceCardHref pattern immediately above: carry the SAME from/to the
+  // server evaluated (using the query's fetch time as the "now" anchor) as the
+  // `from`/`to` UTC-ISO deep-link params CostLedgerView already reads as its
+  // initial selected window (see CostLedgerView.tsx decodeRangeFromRoute usage).
+  const budgetWindowDays = status?.budget.window_days ?? 7;
+  const budgetWindowTo = fetchedAt ?? new Date();
+  const budgetWindowFrom = new Date(budgetWindowTo.getTime() - budgetWindowDays * 24 * 60 * 60 * 1000);
+  const budgetCardHref = buildHash({
+    name: 'cost-ledger',
+    from: budgetWindowFrom.toISOString(),
+    to: budgetWindowTo.toISOString(),
+  });
+
   // Error message: ScopeApiError has .message, otherwise stringify
   const errorMessage: string = isError
     ? (error instanceof Error ? error.message : String(error))
@@ -315,8 +335,10 @@ export default function CommandView() {
             <span className={styles.cardLabel}>Active runs</span>
           </a>
 
-          {/* 7d budget spend */}
-          <a href="#/cost-ledger" className={styles.card} aria-label="7-day budget spend — go to Cost Ledger">
+          {/* 7d budget spend -- deep-links to Cost Ledger pre-filtered to the SAME rolling
+              7-day window it summed (see budgetCardHref above), so the Cost Ledger headline
+              matches this card instead of silently widening to the 30d page default. */}
+          <a href={budgetCardHref} className={styles.card} aria-label="7-day budget spend — go to Cost Ledger filtered to this window">
             <span className={styles.cardValue}>
               {isLoading
                 ? <span className={styles.skeleton} aria-label="Loading budget data" />
