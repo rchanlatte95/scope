@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DEV-ONLY offline entitlement-token issuance tool (T-2026-07-02-04).
+
+    This project is INTENTIONALLY NOT a member of Scope.slnx and is NEVER referenced by
+    scripts/install.ps1 or scripts/publish.ps1 (the two scripts that produce the distributed
+    `scope`/`scope-mcp` tools). It therefore never ships. This mirrors the existing repo
+    convention for dev/bench-only builds that sit outside the shipped solution
+    (benchmarks/Scope.Benchmarks, Scope.Proxy.Tests, Scope.GraphService; see root CLAUDE.md
+    "Benchmark projects, Scope.Proxy.Tests, and GraphService are separate").
+
+    It is pulled into the `dotnet build Scope.slnx` / `dotnet test test/Scope.Tests` graph only
+    as a ProjectReference FROM test/Scope.Tests (test-only dependency), so the end-to-end
+    dry-run test in test/Scope.Tests/Entitlement/EntitlementDryRunIssuanceEndToEndTests.cs can
+    invoke the real tool entry point in-process. That reference does not make this a shipped
+    artifact: Scope.Tests itself is never packed or published.
+
+    Purpose: given a PRIVATE KEY FILE (a throwaway P-256 PKCS8 key, base64-encoded, supplied at
+    runtime from a path OUTSIDE this repo) plus claims (tier/expiry/limits), emit a signed
+    entitlement token envelope using the SAME production signer
+    (EntitlementTokenVerifier.BuildSignedEnvelope) and the SAME production model/JSON-contract
+    types (EntitlementToken, EntitlementLimits, EntitlementJsonContext) already exercised by
+    test/Scope.Tests/Entitlement/EntitlementTokenVerifierTests.cs. No signing logic is
+    reimplemented here.
+
+    This tool NEVER touches EntitlementTokenVerifier.ProductionPublicKeysBase64 and introduces
+    no runtime override of the verification key: it only signs. Verifying a token issued by this
+    tool against the pinned production key set requires the matching PRODUCTION private key,
+    which lives solely in the control plane and is never present on a dev machine or in this repo.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Scope.DevTools.EntitlementIssuer</RootNamespace>
+    <!-- Never published as a self-contained/distributable artifact by CI or scripts/publish.ps1. -->
+    <IsPublishable>false</IsPublishable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Scope.Core\Scope.Core.csproj" />
+  </ItemGroup>
+
+</Project>
