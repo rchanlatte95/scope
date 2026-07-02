@@ -1220,6 +1220,11 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
     } else {
       queryClient.removeQueries({ queryKey: queryKeys.runs(agent.label) });
     }
+    // Finding 12 (T-2026-06-16-07): invalidate command status + budget (prefix match on
+    // invalidationKeys.commandStatus = ['commands'] covers queryKeys.commandStatus AND
+    // queryKeys.commandBudget/baseLaunches) so the budget card converges to near-zero
+    // staleness after a run completes, instead of being up to STALE_BUDGET_MS (120s) stale.
+    void queryClient.invalidateQueries({ queryKey: invalidationKeys.commandStatus });
   }, [runStatusQuery.data, historyOpen, agent.label, queryClient]);
 
   // When run-status query errors (network failure during poll), surface it.
@@ -1248,6 +1253,10 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
         if (historyOpen) {
           void queryClient.invalidateQueries({ queryKey: queryKeys.runs(agent.label) });
         }
+        // Finding 12 (T-2026-06-16-07): terminal-immediately runs (e.g. skipped) still
+        // need the budget/command-status cache invalidated so any cost impact converges
+        // quickly instead of waiting out STALE_BUDGET_MS.
+        void queryClient.invalidateQueries({ queryKey: invalidationKeys.commandStatus });
       } else {
         // Non-terminal (running) — start polling via the run-status query. The agents
         // list and history are invalidated when the run reaches a terminal state (see
