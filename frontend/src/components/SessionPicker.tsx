@@ -30,6 +30,7 @@ import { type DateRange, presetToRange } from '../lib/dateRange';
 import { computePageCount } from '../hooks/usePagination';
 import { DEFAULT_PAGE_SIZE } from '../lib/viewState';
 import { Pagination } from './Pagination';
+import { SkeletonRows } from './Skeleton';
 import styles from './SessionPicker.module.css';
 
 // =============================================================================
@@ -595,7 +596,7 @@ export function SessionPicker({
         hidden={activeTab !== 'cli'}
         className={styles.pickerPanel}
       >
-        {cliQuery.isPending && <p className={styles.pickerNotice}>Loading sessions...</p>}
+        {cliQuery.isPending && <SkeletonRows label="Loading sessions" rows={5} rowHeight={48} />}
         {cliQuery.isError && (
           <p className={styles.pickerError}>
             Failed to load sessions. Is Scope.Server running?
@@ -847,7 +848,7 @@ export function SessionPicker({
         hidden={activeTab !== 'cron'}
         className={styles.pickerPanel}
       >
-        {cronQuery.isPending && <p className={styles.pickerNotice}>Loading cron sessions...</p>}
+        {cronQuery.isPending && <SkeletonRows label="Loading cron sessions" rows={5} rowHeight={48} />}
         {cronQuery.isError && (
           <p className={styles.pickerError}>
             Failed to load cron sessions.

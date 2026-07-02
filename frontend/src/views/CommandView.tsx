@@ -42,6 +42,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { CostProvenanceChip } from '../components/CostProvenanceChip';
 import { EmptyState } from '../components/EmptyState';
 import { EvidenceTable, type EvidenceColumn } from '../components/EvidenceTable';
+import { SkeletonRows } from '../components/Skeleton';
 import styles from './CommandView.module.css';
 
 // ---------------------------------------------------------------------------
@@ -425,7 +426,12 @@ export default function CommandView() {
           </a>
         </div>
         {isLoading && (
-          <p className={styles.loadingMsg} aria-live="polite">Loading recent cron runs&hellip;</p>
+          <SkeletonRows
+            label="Loading recent cron runs"
+            rows={5}
+            rowHeight={40}
+            withHeader
+          />
         )}
         {isError && (
           <EmptyState

@@ -58,7 +58,8 @@ export default tseslint.config(
           // ST-03 (T-2026-06-16-18) added cost-ledger-viewstate.spec.ts.
           // ST-04 (T-2026-06-16-18) added copy-link.spec.ts.
           // T-14 (T-2026-06-20) added trace-summary-panel.spec.ts.
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 52,
+          // T-2026-06-15-09 added trace-loading-skeleton.spec.ts.
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 53,
         },
         tsconfigRootDir: import.meta.dirname,
       },

@@ -172,13 +172,6 @@
 
 /* ---- Shared table area ---- */
 
-.loadingMsg {
-  margin: 0;
-  font-size: var(--scope-font-size-sm);
-  color: var(--scope-color-text-muted);
-  font-style: italic;
-}
-
 .freshness {
   margin: 0;
   font-size: var(--scope-font-size-xs);

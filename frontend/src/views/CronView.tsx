@@ -45,6 +45,7 @@ import { StatusGlyphBlock } from '../components/StatusGlyphBlock';
 import { CostProvenanceChip } from '../components/CostProvenanceChip';
 import { EmptyState } from '../components/EmptyState';
 import { ExportCsvButton } from '../components/ExportCsvButton';
+import { SkeletonRows, SkeletonPanel, SkeletonBlock } from '../components/Skeleton';
 import type { CsvColumn } from '../lib/exportCsv';
 import {
   queryKeys,
@@ -948,7 +949,7 @@ interface AgentListProps {
 
 function AgentList({ state, agents, onChanged, sortKey, sortOrder, onColumnSort, ianaZone, harnessOptions, capabilitiesLoaded }: AgentListProps) {
   if (state.status === 'loading') {
-    return <p className={styles.notice}>Loading cron agents…</p>;
+    return <SkeletonRows label="Loading cron agents" rows={4} rowHeight={44} withHeader />;
   }
   if (state.status === 'error') {
     return (
@@ -1881,7 +1882,7 @@ function RunHistory({ loading, error, runs, onReload }: RunHistoryProps) {
           <div className={styles.errorContent}>{error}</div>
         </div>
       ) : loading && runs === null ? (
-        <p className={styles.notice}>Loading run history…</p>
+        <SkeletonRows label="Loading run history" rows={4} rowHeight={36} withHeader />
       ) : runs != null && runs.length > 0 ? (
         <table className={styles.historyTable}>
           <thead>
@@ -1992,7 +1993,12 @@ export function CronAgentDetail({ agentId }: CronAgentDetailProps) {
     return (
       <div className={styles.view}>
         <PageHeader title="Cron Agent" />
-        <p className={styles.notice}>Loading…</p>
+        {/* Reserves the loaded detail layout: Configuration, Actions, Run history. */}
+        <SkeletonPanel label="Loading cron agent">
+          <SkeletonBlock height={280} />
+          <SkeletonBlock height={64} />
+          <SkeletonBlock height={200} />
+        </SkeletonPanel>
       </div>
     );
   }
