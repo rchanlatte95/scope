@@ -137,6 +137,25 @@ export default function CommandView() {
   const status: CommandStatusResponse | null = commandData ?? null;
   const fetchedAt: Date | null = dataUpdatedAt > 0 ? new Date(dataUpdatedAt) : null;
 
+  // -- "Trace sessions (24h)" card reconciliation (T-2026-06-16-09 finding 5) ------------
+  // The card's count is a FIXED point-in-time UTC count computed server-side
+  // (BuildOperatingStatus, ScopeApp.Command.cs: obs_agent_sessions.last_seen_at >=
+  // UtcNow-24h at request time). The Trace Sessions picker's date-range filter is an
+  // INTERACTIVE local-wall-clock control (deliberately local since commit e529b33 -- a
+  // UTC default hid recent sessions for UTC+ users). These are semantically different
+  // things: a fixed server count vs. an editable client filter. Rather than let the two
+  // numbers silently disagree, the card is labeled explicitly as a UTC window AND its
+  // link deep-links to Trace Sessions pre-filtered to the SAME window it counted (using
+  // the query's fetch time as the "now" anchor, since that is when the server evaluated
+  // the window). Clicking through, the user sees exactly the sessions the count included.
+  const traceWindowTo = fetchedAt ?? new Date();
+  const traceWindowFrom = new Date(traceWindowTo.getTime() - 24 * 60 * 60 * 1000);
+  const traceCardHref = buildHash({
+    name: 'trace',
+    from: traceWindowFrom.toISOString(),
+    to: traceWindowTo.toISOString(),
+  });
+
   // Error message: ScopeApiError has .message, otherwise stringify
   const errorMessage: string = isError
     ? (error instanceof Error ? error.message : String(error))
@@ -314,8 +333,15 @@ export default function CommandView() {
             <span className={styles.cardLabel}>7-day spend</span>
           </a>
 
-          {/* 24h trace count */}
-          <a href="#/trace" className={styles.card} aria-label="Trace sessions last 24h — go to Trace Sessions">
+          {/* 24h trace count -- a fixed UTC window count (see traceCardHref above).
+              Labeled "(UTC)" and links to Trace Sessions pre-filtered to the identical
+              window, so this fixed count and the interactive local-time picker never
+              read as contradictory. */}
+          <a
+            href={traceCardHref}
+            className={styles.card}
+            aria-label="Trace sessions last 24h (UTC) — go to Trace Sessions filtered to this window"
+          >
             <span className={styles.cardValue}>
               {isLoading
                 ? <span className={styles.skeleton} aria-label="Loading trace data" />
@@ -323,7 +349,7 @@ export default function CommandView() {
                   ? <span className={styles.cardError}>Unavailable</span>
                   : String(status?.operating.trace_count_24h ?? '—')}
             </span>
-            <span className={styles.cardLabel}>Trace sessions (24h)</span>
+            <span className={styles.cardLabel}>Trace sessions (24h, UTC)</span>
           </a>
 
           {/* Open warnings — link to audit-log only when that area is available in this build */}
