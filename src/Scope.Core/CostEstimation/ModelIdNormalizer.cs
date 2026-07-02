@@ -153,6 +153,22 @@ public static class ModelIdNormalizer
     /// the operator-supplied external table, NEVER from the built-in seed table. Callers that
     /// need a seed-table fallback should use <see cref="Lookup"/> instead and accept
     /// <see cref="Scope.Core.Cron.Run.CostProvenance.ProviderEstimated"/> provenance.
+    ///
+    /// Matching is <b>verbatim-first</b> (most-specific wins), in TWO passes over
+    /// <paramref name="externalConfig"/>'s models:
+    /// <list type="number">
+    ///   <item>First pass: return the first entry whose id equals <paramref name="rawModelId"/>
+    ///     verbatim (<c>OrdinalIgnoreCase</c>). This is deterministic "most-specific wins": if a
+    ///     config carries both a base entry (e.g. <c>gpt-5</c>) and a more-specific dated entry
+    ///     (e.g. <c>gpt-5.5-2026-04-23</c>), a wire id of <c>gpt-5.5-2026-04-23</c> resolves to the
+    ///     dated entry regardless of list order.</item>
+    ///   <item>Second pass (only if no verbatim match): return the first entry whose id equals the
+    ///     normalized key (<see cref="Normalize"/>) when normalization succeeds
+    ///     (<c>OrdinalIgnoreCase</c>). This is the family-base fallback (e.g. wire
+    ///     <c>gpt-5.5-2026-04-23</c> -> base <c>gpt-5</c>).</item>
+    /// </list>
+    /// A raw id that <see cref="Normalize"/> cannot map (not in the prefix map, e.g. an
+    /// operator-defined <c>claude-x</c>) still verbatim-matches in the first pass.
     /// </summary>
     /// <param name="rawModelId">The observed model id from telemetry (e.g. <c>wire_calls.model</c>).</param>
     /// <param name="externalConfig">
@@ -164,22 +180,27 @@ public static class ModelIdNormalizer
         if (externalConfig is null) return null;
         if (string.IsNullOrWhiteSpace(rawModelId)) return null;
 
-        // Normalize the raw id to a canonical key for the family-base lookup.
-        // key is null when the model is in no known family (not in PrefixMap).
-        var key = Normalize(rawModelId);
-
+        // Pass 1 (verbatim, most-specific wins): the operator's pricing.json carries the exact
+        // wire id. Allowed for all models, including those not in the prefix map. This precedes
+        // the normalized-base fallback so a specific dated entry always beats its family base,
+        // regardless of list order.
         foreach (var m in externalConfig.Models)
         {
-            // Verbatim match: the operator's pricing.json carries the exact wire id.
-            // Allowed for all models, including those not in the prefix map.
             if (StringComparer.OrdinalIgnoreCase.Equals(m.Id, rawModelId))
                 return m;
+        }
 
-            // Normalized-key match: the pricing.json carries the family base entry (e.g. "gpt-5")
-            // and the wire id is a datestamped or versioned variant (e.g. "gpt-5.5-2026-04-23").
-            // Only attempted when normalization succeeds (key is non-null).
-            if (key is not null && StringComparer.OrdinalIgnoreCase.Equals(m.Id, key))
-                return m;
+        // Pass 2 (normalized-base fallback): the pricing.json carries the family base entry
+        // (e.g. "gpt-5") and the wire id is a datestamped or versioned variant
+        // (e.g. "gpt-5.5-2026-04-23"). Only attempted when normalization succeeds (key non-null).
+        var key = Normalize(rawModelId);
+        if (key is not null)
+        {
+            foreach (var m in externalConfig.Models)
+            {
+                if (StringComparer.OrdinalIgnoreCase.Equals(m.Id, key))
+                    return m;
+            }
         }
 
         return null;
