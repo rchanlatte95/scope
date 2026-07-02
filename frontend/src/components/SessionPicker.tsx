@@ -20,9 +20,11 @@ import {
   type ConversationGroup,
 } from '../lib/sessionGeneration';
 import { formatAbsolute } from '../lib/time';
+import { toCostProvenance } from '../lib/provenance';
 import { useToast } from './useToast';
 import { SessionRow, type SessionRowViewModel } from './SessionRow';
 import { CostBillingClassBadge } from './CostBillingClassBadge';
+import { CostProvenanceChip } from './CostProvenanceChip';
 import { DateRangePicker } from './DateRangePicker';
 import { type DateRange, presetToRange } from '../lib/dateRange';
 import { computePageCount } from '../hooks/usePagination';
@@ -184,9 +186,6 @@ function buildCronVm(c: CronSession, zone: string): SessionRowViewModel {
   const statusGlyph = cronStatusGlyph(c.status);
   const statusLbl = cronStatusLabel(c.status);
   const statusClass = cronStatusClass(c.status, styles);
-  const costLabel = c.total_cost_usd != null
-    ? `$${c.total_cost_usd.toFixed(4)}`
-    : 'Cost unavailable';
 
   const indicator: ReactNode = (
     <span className={`${styles.sessionRowStatus ?? ''} ${statusClass}`}>
@@ -203,7 +202,13 @@ function buildCronVm(c: CronSession, zone: string): SessionRowViewModel {
       <span className={styles.sessionRowDot} aria-hidden="true">·</span>
       <span className={styles.sessionRowSchedule} title="Schedule">{c.schedule}</span>
       <span className={styles.sessionRowDot} aria-hidden="true">·</span>
-      <span className={styles.sessionRowCost}>{costLabel}</span>
+      <span className={styles.sessionRowCost}>
+        <CostProvenanceChip
+          variant="single"
+          costUsd={c.total_cost_usd}
+          provenance={toCostProvenance(c.cost_provenance)}
+        />
+      </span>
       {c.cost_billing_class != null && (
         <CostBillingClassBadge billingClass={c.cost_billing_class} />
       )}
