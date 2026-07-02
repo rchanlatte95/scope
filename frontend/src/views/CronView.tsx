@@ -84,6 +84,63 @@ function isTerminalStatus(raw: string | null | undefined): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Cron agent delete review-state copy (T-2026-06-15-08 / G5-05).
+//
+// Shared between AgentRow and AgentDetailActions: names the specific agent and states
+// the concrete consequence, using a REAL run-history count when it is available instead
+// of a fabricated one.
+//
+// IMPORTANT provenance note: DELETE /api/cron/agents/{label} only soft-deletes the agent
+// row server-side (CronRepository.RemoveAgentByLabel sets deleted_at; it does NOT cascade
+// delete cron_runs). So this copy does not claim run-history rows are destroyed — it says
+// they become unreachable from the UI, which IS true (the agent drops out of the list and
+// its detail route 404s), without overclaiming a hard data-deletion fact that isn't real.
+// ---------------------------------------------------------------------------
+
+/** Max `limit` GET /api/cron/agents/{label}/runs accepts (server clamps to [1,500]). */
+const DELETE_RUN_COUNT_FETCH_LIMIT = 500;
+
+/** How long the inline "Cron agent deleted" success status stays visible before the row
+ *  disappears from the list / the detail page navigates back (so it is actually seen). */
+const REMOVE_SUCCESS_DELAY_MS = 900;
+
+type RemoveRunCountState =
+  | { kind: 'loading' }
+  | { kind: 'known'; count: number }
+  | { kind: 'unknown' };
+
+/**
+ * Derives the run-history count state from the delete-confirm count query. 'unknown' covers
+ * both a fetch error and hitting the fetch cap (we cannot tell if the cap IS the true total
+ * or an undercount, so we do not print a number we cannot stand behind).
+ */
+function removeRunCountState(query: { data: CronRun[] | undefined; isError: boolean }): RemoveRunCountState {
+  if (query.data != null) {
+    return query.data.length >= DELETE_RUN_COUNT_FETCH_LIMIT
+      ? { kind: 'unknown' }
+      : { kind: 'known', count: query.data.length };
+  }
+  return query.isError ? { kind: 'unknown' } : { kind: 'loading' };
+}
+
+/** Builds the delete review-state consequence copy naming the agent and the real count. */
+function removeConsequenceCopy(label: string, countState: RemoveRunCountState): string {
+  const headline = `Cron agent ${label} will be permanently deleted.`;
+  const scheduleClause = 'Its schedule stops immediately and it will not run again.';
+  if (countState.kind === 'loading') {
+    return `${headline} ${scheduleClause} Checking its run-history record count…`;
+  }
+  if (countState.kind === 'known') {
+    if (countState.count === 0) {
+      return `${headline} ${scheduleClause} It has no run history yet, so none will be lost. This cannot be undone.`;
+    }
+    const noun = countState.count === 1 ? 'record' : 'records';
+    return `${headline} ${scheduleClause} Its ${String(countState.count)} run-history ${noun} will no longer be visible on this page. This cannot be undone.`;
+  }
+  return `${headline} ${scheduleClause} Its run-history records will no longer be visible on this page. This cannot be undone.`;
+}
+
+// ---------------------------------------------------------------------------
 // Sort state — URL-owned (T-2026-06-13-35).
 //
 // The URL hash owns the sort key and order. Default view (no ?sort=) uses
@@ -1009,8 +1066,16 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removeSuccess, setRemoveSuccess] = useState(false);
   const [editing, setEditing] = useState(false);
   const editBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  // Refs for focus management in the remove-confirm group (mirrors the run-confirm refs below).
+  const removeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const removeConfirmBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Timeout id for the delayed invalidation after a successful delete, so the inline
+  // "Cron agent deleted" status has time to render before the row disappears from the list.
+  const removeSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [confirmingRun, setConfirmingRun] = useState(false);
   // runId tracks the in-flight run for the polling query.
@@ -1053,6 +1118,49 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); };
   }, [confirmingRun]);
+
+  // When the remove-confirm panel opens, move focus to the "Delete cron agent" button
+  // (mirrors the run-confirm focus effect above).
+  useLayoutEffect(() => {
+    if (confirmingRemove) {
+      removeConfirmBtnRef.current?.focus();
+    }
+  }, [confirmingRemove]);
+
+  // When the remove-confirm panel closes via cancel/Escape (NOT via a successful delete, which
+  // shows a success status and unmounts the row shortly after), return focus to "Remove". This
+  // is a useLayoutEffect (not a same-tick .focus() call in the cancel/Escape handlers) because
+  // the "Remove" button is disabled WHILE confirmingRemove is true; calling .focus() on it in the
+  // same synchronous tick as setConfirmingRemove(false) targets a still-disabled element (React
+  // has not yet committed the re-render), so the focus call silently no-ops. Deferring to a
+  // layout effect keyed on confirmingRemove guarantees it runs after commit, when the button is
+  // enabled again.
+  const wasConfirmingRemoveRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!confirmingRemove && wasConfirmingRemoveRef.current && !removeSuccess) {
+      removeBtnRef.current?.focus();
+    }
+    wasConfirmingRemoveRef.current = confirmingRemove;
+  }, [confirmingRemove, removeSuccess]);
+
+  // Escape closes the remove-confirm panel without deleting (focus return handled above).
+  useEffect(() => {
+    if (!confirmingRemove) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setConfirmingRemove(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); };
+  }, [confirmingRemove]);
+
+  // Clear any pending delayed-invalidation timeout on unmount.
+  useEffect(() => {
+    return () => {
+      if (removeSuccessTimeoutRef.current !== null) clearTimeout(removeSuccessTimeoutRef.current);
+    };
+  }, []);
 
   // R2: run history via useQuery (staleTime 15s; only fetches when historyOpen is true).
   const historyQuery = useQuery({
@@ -1188,14 +1296,30 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
     toggleMutation.safeMutate({ label: agent.label, enable: !localEnabled });
   };
 
+  // T-2026-06-15-08: run-history count for the delete review-state copy. Only fetched while
+  // the remove-confirm panel is open, so the consequence copy can name a REAL count.
+  const removeCountQuery = useQuery({
+    queryKey: ['cron', 'runs', agent.label, 'remove-count'] as const,
+    queryFn: () => fetchCronRuns(agent.label, DELETE_RUN_COUNT_FETCH_LIMIT),
+    staleTime: STALE_RUNS_MS,
+    enabled: confirmingRemove,
+  });
+  const removeCountState = removeRunCountState(removeCountQuery);
+
   // R3: remove mutation via useSingleFireMutation.
   const removeMutation = useSingleFireMutation({
     mutationFn: (label: string) => removeCronAgent(label),
     onSuccess: () => {
-      // Invalidate agents list + single-agent query.
-      void queryClient.invalidateQueries({ queryKey: invalidationKeys.agents });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agent(agent.label) });
-      onChanged();
+      setRemoveError(null);
+      setConfirmingRemove(false);
+      // Show the inline success status immediately; delay the actual list invalidation
+      // (which removes this row) so the status is visible for a moment.
+      setRemoveSuccess(true);
+      removeSuccessTimeoutRef.current = setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: invalidationKeys.agents });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.agent(agent.label) });
+        onChanged();
+      }, REMOVE_SUCCESS_DELAY_MS);
     },
     onError: (err: unknown) => {
       setRemoveError(describeError(err).message);
@@ -1205,6 +1329,7 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
 
   const onRemove = () => {
     setRemoveError(null);
+    setRemoveSuccess(false);
     removeMutation.safeMutate(agent.label);
   };
 
@@ -1213,7 +1338,7 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
   };
 
   const hasDetail = confirmingRun || isRunning || runMutation.isPending || runResult !== null || runError !== null || inflightNotice ||
-    historyOpen || toggleError !== null || removeError !== null;
+    historyOpen || toggleError !== null || removeError !== null || confirmingRemove || removeMutation.isPending || removeSuccess;
 
   // Human-readable schedule (T-2026-06-13-35).
   const scheduleHuman = useMemo(() => humanSchedule(agent.schedule, ianaZone), [agent.schedule, ianaZone]);
@@ -1271,26 +1396,15 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
         {historyOpen ? 'Hide run history' : 'Run history'}
       </button>
 
-      {confirmingRemove ? (
-        <span className={styles.confirmGroup} role="group" aria-label={`Confirm removing ${agent.label}`}>
-          <span className={styles.confirmText}>Remove {agent.label}?</span>
-          <button type="button" className={styles.dangerBtn} onClick={onRemove} disabled={removeMutation.isPending}>
-            {removeMutation.isPending ? 'Removing…' : 'Confirm remove'}
-          </button>
-          <button
-            type="button"
-            className={styles.secondaryBtn}
-            onClick={() => { setConfirmingRemove(false); }}
-            disabled={removeMutation.isPending}
-          >
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button type="button" className={styles.secondaryBtn} onClick={() => { setConfirmingRemove(true); }}>
-          Remove
-        </button>
-      )}
+      <button
+        ref={removeBtnRef}
+        type="button"
+        className={styles.secondaryBtn}
+        onClick={() => { setConfirmingRemove(true); }}
+        disabled={confirmingRemove || removeMutation.isPending || removeSuccess}
+      >
+        Remove
+      </button>
     </div>
   );
 
@@ -1354,6 +1468,39 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
         </div>
       ) : null}
 
+      {confirmingRemove ? (
+        <div
+          className={styles.removeConfirmPanel}
+          role="group"
+          aria-label={`Confirm deleting ${agent.label}`}
+          data-testid="remove-confirm-panel"
+        >
+          <StatusGlyphBlock token="danger" shapeName="exclamation-triangle" />
+          <div className={styles.runConfirmContent}>
+            <p className={styles.runConfirmWarning}>{removeConsequenceCopy(agent.label, removeCountState)}</p>
+            <div className={styles.runConfirmActions}>
+              <button
+                ref={removeConfirmBtnRef}
+                type="button"
+                className={styles.dangerBtn}
+                onClick={onRemove}
+                disabled={removeMutation.isPending}
+              >
+                {removeMutation.isPending ? 'Deleting…' : 'Delete cron agent'}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={() => { setConfirmingRemove(false); }}
+                disabled={removeMutation.isPending}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isRunning ? (
         <span id={`running-${layout}-${agent.id}`} className={styles.pending} role="status">
           <span aria-hidden="true">⏳</span> Run in progress — polling for result…
@@ -1373,10 +1520,17 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
         </div>
       ) : null}
 
+      {removeSuccess ? (
+        <div className={styles.success} role="status">
+          <StatusGlyphBlock token="success" shapeName="check-circle" />
+          <div className={styles.successContent}>Cron agent {agent.label} deleted.</div>
+        </div>
+      ) : null}
+
       {removeError != null && removeError !== '' ? (
         <div className={styles.error} role="alert">
           <StatusGlyphBlock token="danger" shapeName="x-circle" />
-          <div className={styles.errorContent}>Failed to remove: {removeError}</div>
+          <div className={styles.errorContent}>Failed to delete: {removeError}</div>
         </div>
       ) : null}
 
@@ -1986,6 +2140,7 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removeSuccess, setRemoveSuccess] = useState(false);
 
   const [confirmingRun, setConfirmingRun] = useState(false);
   // runId tracks the in-flight run for the polling query.
@@ -1997,6 +2152,13 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
 
   const runNowBtnRef = useRef<HTMLButtonElement | null>(null);
   const runConfirmBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  // Refs for focus management in the remove-confirm group (mirrors the run-confirm refs above).
+  const removeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const removeConfirmBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Timeout id for the delayed onRemoved() navigation after a successful delete, so the
+  // inline "Cron agent deleted" status has time to render before navigating back.
+  const removeSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reconcile the optimistic local state with reloaded server truth.
   // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional optimistic-state reconciliation; not a cascading render bug
@@ -2021,6 +2183,44 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); };
   }, [confirmingRun]);
+
+  // When the remove-confirm panel opens, move focus to the "Delete cron agent" button.
+  useLayoutEffect(() => {
+    if (confirmingRemove) {
+      removeConfirmBtnRef.current?.focus();
+    }
+  }, [confirmingRemove]);
+
+  // When the remove-confirm panel closes via cancel/Escape (NOT via a successful delete, which
+  // shows a success status and navigates back shortly after), return focus to "Remove". See the
+  // matching comment in AgentRow above for why this is a layout effect rather than a same-tick
+  // .focus() call in the cancel/Escape handlers (the button is disabled pre-commit).
+  const wasConfirmingRemoveRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!confirmingRemove && wasConfirmingRemoveRef.current && !removeSuccess) {
+      removeBtnRef.current?.focus();
+    }
+    wasConfirmingRemoveRef.current = confirmingRemove;
+  }, [confirmingRemove, removeSuccess]);
+
+  // Escape closes the remove-confirm panel without deleting (focus return handled above).
+  useEffect(() => {
+    if (!confirmingRemove) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setConfirmingRemove(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); };
+  }, [confirmingRemove]);
+
+  // Clear any pending delayed-navigation timeout on unmount.
+  useEffect(() => {
+    return () => {
+      if (removeSuccessTimeoutRef.current !== null) clearTimeout(removeSuccessTimeoutRef.current);
+    };
+  }, []);
 
   // R3 / R2: run-status polling via useQuery (staleTime 0; refetchInterval 1s while non-terminal).
   // Capture runId in a local const so the queryFn can use it without a non-null assertion.
@@ -2139,12 +2339,29 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
     toggleMutation.safeMutate({ label: agent.label, enable: !localEnabled });
   };
 
+  // T-2026-06-15-08: run-history count for the delete review-state copy. Only fetched while
+  // the remove-confirm panel is open, so the consequence copy can name a REAL count.
+  const removeCountQuery = useQuery({
+    queryKey: ['cron', 'runs', agent.label, 'remove-count'] as const,
+    queryFn: () => fetchCronRuns(agent.label, DELETE_RUN_COUNT_FETCH_LIMIT),
+    staleTime: STALE_RUNS_MS,
+    enabled: confirmingRemove,
+  });
+  const removeCountState = removeRunCountState(removeCountQuery);
+
   // R3: remove mutation via useSingleFireMutation.
   const removeMutation = useSingleFireMutation({
     mutationFn: (label: string) => removeCronAgent(label),
     onSuccess: () => {
+      setRemoveError(null);
+      setConfirmingRemove(false);
       void queryClient.invalidateQueries({ queryKey: invalidationKeys.agents });
-      onRemoved();
+      // Show the inline success status immediately; delay navigating back so the status
+      // is visible for a moment before the detail page unmounts.
+      setRemoveSuccess(true);
+      removeSuccessTimeoutRef.current = setTimeout(() => {
+        onRemoved();
+      }, REMOVE_SUCCESS_DELAY_MS);
     },
     onError: (err: unknown) => {
       setRemoveError(describeError(err).message);
@@ -2154,6 +2371,7 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
 
   const onRemove = () => {
     setRemoveError(null);
+    setRemoveSuccess(false);
     removeMutation.safeMutate(agent.label);
   };
 
@@ -2181,26 +2399,15 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
           {toggleMutation.isPending ? (localEnabled ? 'Disabling…' : 'Enabling…') : (localEnabled ? 'Disable' : 'Enable')}
         </button>
 
-        {confirmingRemove ? (
-          <span className={styles.confirmGroup} role="group" aria-label={`Confirm removing ${agent.label}`}>
-            <span className={styles.confirmText}>Remove {agent.label}?</span>
-            <button type="button" className={styles.dangerBtn} onClick={onRemove} disabled={removeMutation.isPending}>
-              {removeMutation.isPending ? 'Removing…' : 'Confirm remove'}
-            </button>
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              onClick={() => { setConfirmingRemove(false); }}
-              disabled={removeMutation.isPending}
-            >
-              Cancel
-            </button>
-          </span>
-        ) : (
-          <button type="button" className={styles.secondaryBtn} onClick={() => { setConfirmingRemove(true); }}>
-            Remove
-          </button>
-        )}
+        <button
+          ref={removeBtnRef}
+          type="button"
+          className={styles.secondaryBtn}
+          onClick={() => { setConfirmingRemove(true); }}
+          disabled={confirmingRemove || removeMutation.isPending || removeSuccess}
+        >
+          Remove
+        </button>
       </div>
 
       {confirmingRun ? (
@@ -2261,6 +2468,39 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
         </div>
       ) : null}
 
+      {confirmingRemove ? (
+        <div
+          className={styles.removeConfirmPanel}
+          role="group"
+          aria-label={`Confirm deleting ${agent.label}`}
+          data-testid="remove-confirm-panel"
+        >
+          <StatusGlyphBlock token="danger" shapeName="exclamation-triangle" />
+          <div className={styles.runConfirmContent}>
+            <p className={styles.runConfirmWarning}>{removeConsequenceCopy(agent.label, removeCountState)}</p>
+            <div className={styles.runConfirmActions}>
+              <button
+                ref={removeConfirmBtnRef}
+                type="button"
+                className={styles.dangerBtn}
+                onClick={onRemove}
+                disabled={removeMutation.isPending}
+              >
+                {removeMutation.isPending ? 'Deleting…' : 'Delete cron agent'}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={() => { setConfirmingRemove(false); }}
+                disabled={removeMutation.isPending}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isRunning ? (
         <span id={`detail-running-${agent.id}`} className={styles.pending} role="status">
           <span aria-hidden="true">⏳</span> Run in progress — polling for result…
@@ -2280,10 +2520,17 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
         </div>
       ) : null}
 
+      {removeSuccess ? (
+        <div className={styles.success} role="status">
+          <StatusGlyphBlock token="success" shapeName="check-circle" />
+          <div className={styles.successContent}>Cron agent {agent.label} deleted.</div>
+        </div>
+      ) : null}
+
       {removeError != null && removeError !== '' ? (
         <div className={styles.error} role="alert">
           <StatusGlyphBlock token="danger" shapeName="x-circle" />
-          <div className={styles.errorContent}>Failed to remove: {removeError}</div>
+          <div className={styles.errorContent}>Failed to delete: {removeError}</div>
         </div>
       ) : null}
 
