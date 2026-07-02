@@ -37,8 +37,10 @@ public static class BudgetNotice
         var formatted = budget.ToString("N0", CultureInfo.InvariantCulture);
         return
             $"[Scope] You have a total token budget of {formatted} tokens (input + output + cache combined) " +
-            "for this run. Plan your work to finish within it. When the budget is reached, Scope stops the " +
-            "run: new model calls are refused with a terminal error and the process is terminated. Prioritize " +
-            "completing and reporting your most important result before the budget is exhausted.";
+            "for this run. Plan your work to finish within it. This budget is best-effort, not a hard " +
+            "ceiling: once cumulative tokens reach it, Scope refuses to start any NEW model call with a " +
+            "terminal error and terminates the process, but a call already in flight when the budget is " +
+            "crossed is allowed to finish, so actual spend can exceed the budget by up to one model call. " +
+            "Prioritize completing and reporting your most important result before the budget is exhausted.";
     }
 }
