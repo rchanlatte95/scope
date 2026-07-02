@@ -326,7 +326,8 @@ public sealed class CronService
         int? exitCode,
         double? totalCostUsd,
         string? errorMessage,
-        string? costProvenance = null)
+        string? costProvenance = null,
+        bool meteringMisconfigured = false)
     {
         _repository.EnsureSchema();
 
@@ -342,7 +343,7 @@ public sealed class CronService
 
         var completedAt = DateTime.UtcNow.ToString("o");
         if (!_repository.UpdateRunCompletion(runId.Trim(), status, exitCode, completedAt, totalCostUsd,
-                TrimToNull(errorMessage), TrimToNull(costProvenance)))
+                TrimToNull(errorMessage), TrimToNull(costProvenance), meteringMisconfigured))
             return CronResult.Fail<CronRunRecord>($"Cron run not found: {runId.Trim()}");
 
         var updated = _repository.GetRunById(runId.Trim());

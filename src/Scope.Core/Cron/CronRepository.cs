@@ -92,10 +92,12 @@ public sealed class CronRepository(SqliteConnection connection)
         cmd.CommandText = """
             INSERT INTO cron_runs (
                 id, cron_agent_id, dispatch_id, session_key, started_at, completed_at,
-                status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance)
+                status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance,
+                metering_misconfigured)
             VALUES (
                 $id, $cronAgentId, $dispatchId, $sessionKey, $startedAt, $completedAt,
-                $status, $exitCode, $totalCostUsd, $skipReason, $errorMessage, $costProvenance);
+                $status, $exitCode, $totalCostUsd, $skipReason, $errorMessage, $costProvenance,
+                $meteringMisconfigured);
             """;
         cmd.Parameters.AddWithValue("$id", run.Id);
         cmd.Parameters.AddWithValue("$cronAgentId", run.CronAgentId);
@@ -109,6 +111,8 @@ public sealed class CronRepository(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$skipReason", (object?)run.SkipReason ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$errorMessage", (object?)run.ErrorMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$costProvenance", (object?)run.CostProvenance ?? DBNull.Value);
+        // metering_misconfigured: schema v7; stored as 0/1 INTEGER; false on initial insert (run not yet finalized).
+        cmd.Parameters.AddWithValue("$meteringMisconfigured", run.MeteringMisconfigured ? 1 : 0);
         cmd.ExecuteNonQuery();
     }
 
@@ -122,7 +126,8 @@ public sealed class CronRepository(SqliteConnection connection)
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT id, cron_agent_id, dispatch_id, session_key, started_at, completed_at,
-                   status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance
+                   status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance,
+                   metering_misconfigured
             FROM cron_runs
             WHERE cron_agent_id = $cronAgentId AND status = $running
             ORDER BY started_at DESC
@@ -136,7 +141,8 @@ public sealed class CronRepository(SqliteConnection connection)
 
     /// <summary>
     /// Transitions a run row to a terminal state (completed/failed), setting exit code,
-    /// completion timestamp, cost, cost provenance, and error message. Returns true when a row was updated.
+    /// completion timestamp, cost, cost provenance, error message, and the metering-misconfigured
+    /// flag. Returns true when a row was updated.
     /// </summary>
     public bool UpdateRunCompletion(
         string runId,
@@ -145,7 +151,8 @@ public sealed class CronRepository(SqliteConnection connection)
         string completedAt,
         double? totalCostUsd,
         string? errorMessage,
-        string? costProvenance = null)
+        string? costProvenance = null,
+        bool meteringMisconfigured = false)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
@@ -155,7 +162,8 @@ public sealed class CronRepository(SqliteConnection connection)
                 completed_at = $completedAt,
                 total_cost_usd = $totalCostUsd,
                 error_message = $errorMessage,
-                cost_provenance = $costProvenance
+                cost_provenance = $costProvenance,
+                metering_misconfigured = $meteringMisconfigured
             WHERE id = $id;
             """;
         cmd.Parameters.AddWithValue("$id", runId);
@@ -165,6 +173,8 @@ public sealed class CronRepository(SqliteConnection connection)
         cmd.Parameters.AddWithValue("$totalCostUsd", (object?)totalCostUsd ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$errorMessage", (object?)errorMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$costProvenance", (object?)costProvenance ?? DBNull.Value);
+        // metering_misconfigured: schema v7; stored as 0/1 INTEGER; false = no misconfiguration detected.
+        cmd.Parameters.AddWithValue("$meteringMisconfigured", meteringMisconfigured ? 1 : 0);
         return cmd.ExecuteNonQuery() > 0;
     }
 
@@ -174,7 +184,8 @@ public sealed class CronRepository(SqliteConnection connection)
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT id, cron_agent_id, dispatch_id, session_key, started_at, completed_at,
-                   status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance
+                   status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance,
+                   metering_misconfigured
             FROM cron_runs
             WHERE id = $id;
             """;
@@ -306,7 +317,8 @@ public sealed class CronRepository(SqliteConnection connection)
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT id, cron_agent_id, dispatch_id, session_key, started_at, completed_at,
-                   status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance
+                   status, exit_code, total_cost_usd, skip_reason, error_message, cost_provenance,
+                   metering_misconfigured
             FROM cron_runs
             WHERE cron_agent_id = $cronAgentId
             ORDER BY started_at DESC
@@ -431,5 +443,7 @@ public sealed class CronRepository(SqliteConnection connection)
             reader.IsDBNull(9) ? null : reader.GetString(9),
             reader.IsDBNull(10) ? null : reader.GetString(10),
             // cost_provenance: column 11, added in schema v3; null for historical rows -> 'unavailable' at DTO level.
-            reader.FieldCount > 11 && !reader.IsDBNull(11) ? reader.GetString(11) : null);
+            reader.FieldCount > 11 && !reader.IsDBNull(11) ? reader.GetString(11) : null,
+            // metering_misconfigured: column 12, added in schema v7; NULL for historical rows -> false (honest).
+            reader.FieldCount > 12 && !reader.IsDBNull(12) && reader.GetInt32(12) != 0);
 }

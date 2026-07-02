@@ -45,6 +45,17 @@ public sealed class CronSchemaManager(SqliteConnection connection)
     /// only when the existing CHECK does not already admit <c>'budget_exhausted'</c>. Lazy-read gotcha:
     /// any live read endpoint that projects <c>max_runtime_seconds</c> or filters on the new status must
     /// reach this migration first; every cron read goes through <see cref="CronRepository.EnsureSchema"/>.
+    ///
+    /// v7 (F6, 2026-07-01): metering-misconfiguration flag. Adds a nullable
+    /// <c>metering_misconfigured INTEGER</c> column to <c>cron_runs</c> via ALTER TABLE ADD COLUMN,
+    /// guarded by a PRAGMA table_info column-existence check. NULL reads back as <c>false</c> (honest
+    /// for historical rows that predate the column). The flag is set by the cron runner when metering
+    /// was expected (proxy base-url and api-key were both set) but the final resolved provenance is
+    /// still <c>unmetered</c> after the F2 self-reported fallback. It is NEVER set for
+    /// <c>joined_exact</c>, <c>provider_estimated</c>, <c>unavailable</c>, or honest no-proxy
+    /// <c>unmetered</c>. This is the CRON DB <c>cron_schema_versions</c>, NOT
+    /// <c>SchemaVersion.Current</c> (scope.db); no re-indexing is triggered. v7 runs last and only
+    /// ADDs a column; the v5/v6 table-recreate blocks are not modified.
     /// </summary>
     public void EnsureSchema()
     {
@@ -132,6 +143,14 @@ public sealed class CronSchemaManager(SqliteConnection connection)
         // Both sub-steps are idempotent.
         ApplyV6RunawayGuard();
         InsertSchemaVersion(6, "Runaway guard: max_runtime_seconds column + 'budget_exhausted' run status");
+
+        // v7: metering_misconfigured INTEGER column on cron_runs (F6, 2026-07-01).
+        // ALTER TABLE ADD COLUMN is safe for nullable columns: the column is added when absent,
+        // existing rows get NULL (read back as false by the DTO mapper). v7 runs LAST and only
+        // ADDs a column; the v5/v6 table-recreate blocks are not modified. This is the CRON DB
+        // cron_schema_versions, NOT the main index SchemaVersion.Current.
+        ApplyV7MeteringMisconfigured();
+        InsertSchemaVersion(7, "metering_misconfigured column on cron_runs (F6)");
     }
 
     /// <summary>
@@ -221,6 +240,37 @@ public sealed class CronSchemaManager(SqliteConnection connection)
 
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "ALTER TABLE cron_runs ADD COLUMN cost_provenance TEXT;";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds <c>metering_misconfigured INTEGER</c> to <c>cron_runs</c> when the column does not already
+    /// exist. SQLite ALTER TABLE ADD COLUMN is idempotent-safe via the column-existence check;
+    /// if the column already exists the command is silently skipped. NULL reads back as <c>false</c>
+    /// (honest for historical rows that predate the column). Exact structural mirror of
+    /// <see cref="ApplyV3CostProvenance"/>.
+    /// </summary>
+    private void ApplyV7MeteringMisconfigured()
+    {
+        var hasColumn = false;
+        using (var infoCmd = connection.CreateCommand())
+        {
+            infoCmd.CommandText = "PRAGMA table_info(cron_runs);";
+            using var reader = infoCmd.ExecuteReader();
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), "metering_misconfigured", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasColumn) return;
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "ALTER TABLE cron_runs ADD COLUMN metering_misconfigured INTEGER;";
         cmd.ExecuteNonQuery();
     }
 
