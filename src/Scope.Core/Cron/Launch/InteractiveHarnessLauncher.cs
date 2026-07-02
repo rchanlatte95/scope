@@ -29,7 +29,7 @@ public sealed record InteractiveLaunchResult(
 /// <para>
 /// <see cref="BaseUrlEnvVar"/> and <see cref="BaseUrl"/> are optional. When both are provided, the
 /// child env gains the proxy base-URL env var (e.g. <c>ANTHROPIC_BASE_URL</c> for Claude). When
-/// omitted (null), no base-URL env var is set — the Codex path uses this because it routes via
+/// omitted (null), no base-URL env var is set - the Codex path uses this because it routes via
 /// <see cref="ExtraArgs"/> <c>-c model_providers</c> flags instead of a base-URL env var.
 /// </para>
 /// <para>
@@ -202,7 +202,7 @@ public sealed class InteractiveHarnessLauncher
         // un-metered subscription path.
         //
         // BaseUrlEnvVar is nullable: Claude supplies ANTHROPIC_BASE_URL; Codex routes via -c flags
-        // (ExtraArgs) instead and leaves BaseUrlEnvVar null — so the guard skips the env-var write.
+        // (ExtraArgs) instead and leaves BaseUrlEnvVar null - so the guard skips the env-var write.
         if (proxyWiring is not null)
         {
             var baseUrlEnvVar = proxyWiring.BaseUrlEnvVar;

@@ -31,7 +31,7 @@ public static class InteractiveMeterGate
     /// <summary>
     /// Decides whether an interactive session should be metered. Pure and side-effect-free so the gate
     /// is unit-testable without a real proxy or process. Used by both the Claude and Codex paths
-    /// (the Codex path always passes <c>noMeter: false</c> — there is no Codex --no-meter flag).
+    /// (the Codex path always passes <c>noMeter: false</c> - there is no Codex --no-meter flag).
     /// </summary>
     /// <param name="apiKeyFromParentEnv">The provider API key read from the PARENT process environment, or null/empty when absent.</param>
     /// <param name="noMeter">True when the user passed <c>--no-meter</c> to opt this session out of metering (Claude only; always false for Codex).</param>
@@ -57,7 +57,7 @@ public static class InteractiveMeterGate
     /// <summary>
     /// Builds the interactive proxy wiring for a metered Codex session. Unlike the Claude path, Codex
     /// routes traffic through the OpenAI proxy via <c>-c model_providers.scope.*</c> args injected by
-    /// <see cref="CodexHarnessLauncher.BuildOpenAiMeteringArgs"/> — no <c>OPENAI_BASE_URL</c> or
+    /// <see cref="CodexHarnessLauncher.BuildOpenAiMeteringArgs"/> - no <c>OPENAI_BASE_URL</c> or
     /// <c>base_url</c> env var is touched. <c>CODEX_API_KEY</c> is set in the child env so the Codex
     /// <c>env_key</c> config reads it from a well-known name. This leaves <c>~/.codex/auth.json</c>
     /// byte-identical and is non-destructive, matching the procedure verified on real Codex 0.141 traffic.
