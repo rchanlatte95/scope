@@ -23,6 +23,17 @@ import { friendlyModelName } from '../lib/modelName';
 import styles from './SettingsView.module.css';
 
 // ---------------------------------------------------------------------------
+// A11Y-P2 audit note (T-2026-07-02-05): a "reduced pattern"/"reduced noise"
+// display preference was considered and is MOOT. The sharp/geometric design
+// (2026-06-14 migration) has no texture-heavy surfaces (hatching, dither,
+// dense pattern fills) left to reduce — grep for texture/hatch/dither finds
+// nothing in the current frontend. Do not add a toggle for a non-existent
+// problem. The one real remaining a11y-p2 gap was that preference changes
+// mutated the live UI without an assistive-tech announcement; that gap is
+// closed below via describePrefChange + the live region in SettingsView.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Tab definitions
 // ---------------------------------------------------------------------------
 
@@ -205,6 +216,47 @@ const TIMEZONE_OPTIONS: TzOption[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Assistive-tech announcement wording (T-2026-07-02-05, A11Y-P2 gap b).
+//
+// Preference changes mutate the live UI (root data-* attributes, timezone
+// display, cost model) immediately, but that mutation is otherwise silent to
+// screen readers. describePrefChange renders the RESULTING STATE (never
+// "changed") for the polite live region in SettingsView so assistive tech
+// gets an announcement on every pref change, worded to match the visible
+// fieldset label.
+// ---------------------------------------------------------------------------
+
+function describePrefChange<K extends keyof Prefs>(key: K, value: Prefs[K]): string {
+  switch (key) {
+    case 'theme': {
+      const v = value as Prefs['theme'];
+      const label = v === 'system' ? 'System' : v === 'light' ? 'Light' : 'Dark';
+      return `Theme set to ${label}`;
+    }
+    case 'fontScale':
+      return `Text size set to ${String(value)}%`;
+    case 'readableFont': {
+      const v = value as Prefs['readableFont'];
+      if (v === 'off') return 'Readable font off';
+      return `Readable font set to ${v === 'atkinson' ? 'Atkinson Hyperlegible' : 'OpenDyslexic'}`;
+    }
+    case 'visualCues': {
+      const v = value as Prefs['visualCues'];
+      return `Visual cues set to ${v === 'standard' ? 'Standard' : 'Strong'}`;
+    }
+    case 'timezone': {
+      const v = value as Prefs['timezone'];
+      const opt = TIMEZONE_OPTIONS.find((o) => o.value === v);
+      return `Timezone set to ${opt?.label ?? v}`;
+    }
+    case 'assumedCostModel':
+      return `Assumed cost model set to ${friendlyModelName(value as AssumedCostModel)}`;
+    default:
+      return `${String(key)} updated`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Workspace tab — timezone control (real) + operational info (coming soon)
 // ---------------------------------------------------------------------------
 
@@ -290,6 +342,12 @@ export default function SettingsView() {
   // Prefs state — loaded from localStorage on mount; kept in sync on change.
   const [prefs, setPrefs] = useState<Prefs>(() => readPrefs());
 
+  // Assistive-tech announcement text (A11Y-P2 gap b, T-2026-07-02-05). Empty
+  // until the first pref change; updated once per change in handlePrefChange
+  // (never on mount/reload) so restoring persisted prefs stays silent and only
+  // an actual user-driven mutation is announced.
+  const [announcement, setAnnouncement] = useState('');
+
   // If the tab changes (via URL) while mounted, we don't need to re-read prefs.
   // But on first mount sync prefs from localStorage (already done in useState init).
 
@@ -306,10 +364,12 @@ export default function SettingsView() {
     applyPrefs(prefs, document.documentElement);
   }, [prefs]);
 
-  // Pref change handler: write to localStorage and update state.
+  // Pref change handler: write to localStorage, update state, and announce
+  // the resulting state to assistive tech via the polite live region below.
   function handlePrefChange<K extends keyof Prefs>(key: K, value: Prefs[K]) {
     writePref(key, value);
     setPrefs((prev) => ({ ...prev, [key]: value }));
+    setAnnouncement(describePrefChange(key, value));
   }
 
   // Keyboard arrow navigation on the tablist.
@@ -344,6 +404,23 @@ export default function SettingsView() {
   return (
     <div className={styles.view}>
       <PageHeader title="Settings" />
+
+      {/*
+        A11Y-P2 gap (b): preference changes mutate the live UI (root data-*
+        attributes) immediately, so an assistive-tech user needs an explicit
+        announcement of the resulting state. Visually hidden (styles.srOnly),
+        polite so it does not interrupt ongoing speech, aria-atomic so the
+        whole sentence is re-read on each change rather than a diff.
+      */}
+      <p
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className={styles.srOnly}
+        data-testid="settings-announcement"
+      >
+        {announcement}
+      </p>
 
       {/* Tab bar */}
       <div

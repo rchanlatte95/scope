@@ -14,6 +14,21 @@
   padding: var(--scope-space-6);
 }
 
+/* Visually hidden — announces to screen readers but takes no visible space.
+   Use clip-rect (not display:none, which suppresses AT announcement). Same
+   pattern as TraceView.module.css / CostLedgerView.module.css .srOnly. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------------------------------------------------------------------------
    Tab bar
 --------------------------------------------------------------------------- */
