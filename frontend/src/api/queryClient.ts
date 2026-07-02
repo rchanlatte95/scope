@@ -112,8 +112,14 @@ export const queryKeys = {
   traceFull: (sessionKey: string, cursor: string | null, page?: number, pageSize?: number) =>
     ['traces', 'full', sessionKey, cursor, page ?? null, pageSize ?? null] as const,
 
-  /** Rollup: GET /api/trace/rollup?session= */
-  traceRollup: (sessionKey: string) => ['traces', 'rollup', sessionKey] as const,
+  /**
+   * Rollup: GET /api/trace/rollup?session=&assumedModel= (T-2026-06-16-07).
+   * assumedModel is part of the key: it is a server-side cost estimation peg for
+   * tasks with no recorded model, so a changed value is a genuinely different
+   * response and must be a distinct cache entry (not merely a refetch trigger).
+   */
+  traceRollup: (sessionKey: string, assumedModel?: string) =>
+    ['traces', 'rollup', sessionKey, assumedModel ?? null] as const,
 
   /** Top actions: GET /api/trace/top-actions?session= */
   traceTopActions: (sessionKey: string) => ['traces', 'top-actions', sessionKey] as const,

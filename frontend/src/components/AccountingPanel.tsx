@@ -1,9 +1,8 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   fetchTraceRollup,
   fetchTraceTopActions,
-  type RollupBody,
-  type TopActionsBody,
   type RollupRow,
   type TopActionRow,
   type CostEstimationBasis,
@@ -11,6 +10,7 @@ import {
   type TokenAggregate,
   type ProvenanceBreakdownRow,
 } from '../api/traceApi';
+import { queryKeys, STALE_COMMANDS_TRACES_MS } from '../api/queryClient';
 import { taxonomyFor } from '../lib/taxonomy';
 import { formatAbsoluteDate } from '../lib/time';
 import {
@@ -341,16 +341,13 @@ interface AccountingPanelProps {
   zone: string;
 }
 
-type State =
-  | { status: 'loading' }
-  | { status: 'error'; message: string }
-  | { status: 'loaded'; rollup: RollupBody; top: TopActionsBody };
-
 export default function AccountingPanel({ sessionKey, zone }: AccountingPanelProps) {
-  const [state, setState] = useState<State>({ status: 'loading' });
   // Read the assumed cost model pref on every render so that a change in SettingsView
   // (which writes to localStorage and triggers a re-render via parent state) causes a
-  // re-fetch with the new assumedModel query param.
+  // re-fetch with the new assumedModel query param. assumedModel is part of the rollup
+  // query key (queryKeys.traceRollup) so a changed value is a distinct cache entry
+  // (fresh fetch) while an unchanged value serves from cache under the shared
+  // TanStack Query cache governance (T-2026-06-16-07).
   const assumedModel = readPrefs().assumedCostModel;
 
   // Stable tooltip ids for the header totals and the tfoot row (one per mounted panel).
@@ -358,26 +355,35 @@ export default function AccountingPanel({ sessionKey, zone }: AccountingPanelPro
   const totalsTokenTipId = useMemo(() => nextTokenTipId(), []);
   const totalsFooterTokenTipId = useMemo(() => nextTokenTipId(), []);
 
-  useEffect(() => {
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional loading-state reset at effect start; not a cascading render bug (async data fetch)
-    setState({ status: 'loading' });
-    Promise.all([fetchTraceRollup(sessionKey, assumedModel), fetchTraceTopActions(sessionKey, 20)])
-      .then(([r, t]) => {
-        if (!cancelled) setState({ status: 'loaded', rollup: r.body, top: t.body });
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionKey, assumedModel]);
+  // R2 (T-2026-06-16-07): rollup + top-actions via useQuery under STALE_COMMANDS_TRACES_MS.
+  // Rapid Trace<->Costs tab toggling remounts this component (TraceView conditionally
+  // renders it), but the shared queryClient cache means a remount within staleTime
+  // serves cached data with no network refetch.
+  const rollupQuery = useQuery({
+    queryKey: queryKeys.traceRollup(sessionKey, assumedModel),
+    queryFn: () => fetchTraceRollup(sessionKey, assumedModel),
+    staleTime: STALE_COMMANDS_TRACES_MS,
+  });
+  const topActionsQuery = useQuery({
+    queryKey: queryKeys.traceTopActions(sessionKey),
+    queryFn: () => fetchTraceTopActions(sessionKey, 20),
+    staleTime: STALE_COMMANDS_TRACES_MS,
+  });
 
-  if (state.status === 'loading') return <p className={styles.notice}>Loading accounting…</p>;
-  if (state.status === 'error') return <p className={styles.error}>Failed to load accounting: {state.message}</p>;
+  if (rollupQuery.isLoading || topActionsQuery.isLoading) {
+    return <p className={styles.notice}>Loading accounting…</p>;
+  }
+  if (rollupQuery.isError || topActionsQuery.isError) {
+    const err = rollupQuery.error ?? topActionsQuery.error;
+    const message = err instanceof Error ? err.message : String(err);
+    return <p className={styles.error}>Failed to load accounting: {message}</p>;
+  }
 
-  const { rollup, top } = state;
+  // At this point isLoading and isError are both false for both queries, so data is defined.
+  const rollup = rollupQuery.data?.body ?? null;
+  const top = topActionsQuery.data?.body ?? null;
+  if (rollup === null || top === null) return null;
+
   const totals = rollup.totals;
   const stamp = pricesAsOfLabel(totals.cost.pricing_version, (ts) => formatAbsoluteDate(ts, zone));
   const tokenCaption = coverageCaption(totals.tokens.coverage, 'tasks measured');
