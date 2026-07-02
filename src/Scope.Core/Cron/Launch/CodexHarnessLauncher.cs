@@ -46,9 +46,19 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
     private const string DispatchEnvVar = "SCOPE_DISPATCH_ID";
     private const string SessionEnvVar = "SCOPE_SESSION_KEY";
 
+    /// <summary>
+    /// Default interval at which the final-message sentinel (see <see cref="LaunchAsync"/>) polls
+    /// for <see cref="FinalMessageFileName"/> to appear. Within the 2-5s band called for by
+    /// T-2026-07-02-01: frequent enough to resolve a finished-but-hung <c>codex exec</c> run
+    /// promptly, sparse enough to be negligible I/O overhead against an artifact directory.
+    /// </summary>
+    internal static readonly TimeSpan DefaultSentinelPollInterval = TimeSpan.FromSeconds(3);
+
     private readonly IProcessRunner _processRunner;
     private readonly string _executable;
     private readonly Func<string, ResolvedExecutable> _resolve;
+    private readonly TimeSpan _sentinelPollInterval;
+    private readonly Action? _onSentinelPollForTests;
 
     /// <summary>
     /// Creates the Codex adapter over a process runner, resolving the logical executable name
@@ -70,10 +80,32 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
     /// <param name="executable">Logical Codex executable name.</param>
     /// <param name="resolve">Resolver mapping the logical name to a <see cref="ResolvedExecutable"/>.</param>
     public CodexHarnessLauncher(IProcessRunner processRunner, string executable, Func<string, ResolvedExecutable> resolve)
+        : this(processRunner, executable, resolve, DefaultSentinelPollInterval)
+    {
+    }
+
+    /// <summary>
+    /// Test-only constructor that additionally injects the final-message sentinel's poll interval
+    /// (and an optional per-poll test hook) so tests can exercise the codex-exec-hang fix
+    /// (T-2026-07-02-01) deterministically and fast, without waiting on the production 2-5s cadence.
+    /// </summary>
+    /// <param name="processRunner">Process execution seam.</param>
+    /// <param name="executable">Logical Codex executable name.</param>
+    /// <param name="resolve">Resolver mapping the logical name to a <see cref="ResolvedExecutable"/>.</param>
+    /// <param name="sentinelPollInterval">Interval between <see cref="FinalMessageFileName"/> existence checks.</param>
+    /// <param name="onSentinelPollForTests">Invoked once per sentinel poll iteration; test-only observability hook.</param>
+    internal CodexHarnessLauncher(
+        IProcessRunner processRunner,
+        string executable,
+        Func<string, ResolvedExecutable> resolve,
+        TimeSpan sentinelPollInterval,
+        Action? onSentinelPollForTests = null)
     {
         _processRunner = processRunner;
         _executable = executable;
         _resolve = resolve;
+        _sentinelPollInterval = sentinelPollInterval;
+        _onSentinelPollForTests = onSentinelPollForTests;
     }
 
     /// <inheritdoc />
@@ -175,22 +207,65 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
         }
 
         var startedAt = DateTime.UtcNow.ToString("o");
+
+        // T-2026-07-02-01: `codex exec` writes its --output-last-message artifact to
+        // finalMessagePath but does NOT exit afterward, so a naive wall-clock guard would force-kill
+        // an already-finished run and misclassify it as WallClock/failed. This sentinel polls for
+        // the artifact concurrently and, on appearance, self-cancels the process via its OWN
+        // cancellation source (never the caller's) so a genuine external/guard cancellation is
+        // always distinguishable and always still kills + propagates (never swallowed).
+        using var watcherOwnedCts = new CancellationTokenSource();
+        using var sentinelLifetime = new CancellationTokenSource();
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, watcherOwnedCts.Token);
+        using var sentinelBoundCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, sentinelLifetime.Token);
+        var sentinelTask = WatchForFinalMessageAsync(
+            finalMessagePath, watcherOwnedCts, sentinelBoundCts.Token, _sentinelPollInterval, _onSentinelPollForTests);
+
         ProcessRunResult processResult;
         try
         {
-            processResult = await _processRunner.RunAsync(runRequest, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (IsBinaryMissing(ex))
-        {
-            var detail = $"Codex CLI '{_executable}' (resolved to '{resolved.ResolvedPath}') could not be started at launch.";
-            return new HarnessLaunchResult
+            try
             {
-                Capability = HarnessCapability.BinaryNotFound(detail),
-                Succeeded = false,
-                FailureReason = detail,
-                StartedAt = startedAt,
-                CompletedAt = DateTime.UtcNow.ToString("o"),
-            };
+                processResult = await _processRunner.RunAsync(runRequest, runCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsBinaryMissing(ex))
+            {
+                var detail = $"Codex CLI '{_executable}' (resolved to '{resolved.ResolvedPath}') could not be started at launch.";
+                return new HarnessLaunchResult
+                {
+                    Capability = HarnessCapability.BinaryNotFound(detail),
+                    Succeeded = false,
+                    FailureReason = detail,
+                    StartedAt = startedAt,
+                    CompletedAt = DateTime.UtcNow.ToString("o"),
+                };
+            }
+            catch (OperationCanceledException) when (
+                watcherOwnedCts.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested
+                && File.Exists(finalMessagePath))
+            {
+                // The sentinel found the artifact and self-cancelled the still-running process. The
+                // caller did NOT ask to stop (checked above), so this is the codex-exec-hang case,
+                // not a genuine guard kill: resolve as a SUCCESS from the on-disk artifacts.
+                return await BuildSentinelSuccessResultAsync(
+                    capability, finalMessagePath, rawEventStreamPath, stdoutPath, stderrPath, startedAt, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // Bounded sentinel: stop it and wait for it to actually finish before this method
+            // returns, so it never outlives the process it was watching.
+            await sentinelLifetime.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await sentinelTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected: the sentinel's delay observes sentinelLifetime/cancellationToken ending.
+            }
         }
 
         var completedAt = DateTime.UtcNow.ToString("o");
@@ -214,6 +289,83 @@ public sealed class CodexHarnessLauncher : IHarnessLauncher
             Artifacts = new HarnessArtifacts(rawEventStreamPath, finalMessagePath, stdoutPath, stderrPath),
             ThreadId = summary.ThreadId,
             Usage = summary.Usage,
+        };
+    }
+
+    /// <summary>
+    /// Polls for <paramref name="finalMessagePath"/> to appear and, on appearance, cancels
+    /// <paramref name="watcherOwnedCts"/> (never the caller's own token) so <see cref="LaunchAsync"/>
+    /// can distinguish "our sentinel fired" from "the caller/guard cancelled" when it later inspects
+    /// which source requested cancellation. Bounded by <paramref name="boundToken"/>, which the
+    /// caller cancels once the process run has concluded for any reason, so this loop can never
+    /// outlive the process it is watching. Never throws: a cancellation of <paramref name="boundToken"/>
+    /// (external stop or normal process completion) simply ends the loop with no artifact found.
+    /// </summary>
+    private static async Task WatchForFinalMessageAsync(
+        string finalMessagePath,
+        CancellationTokenSource watcherOwnedCts,
+        CancellationToken boundToken,
+        TimeSpan pollInterval,
+        Action? onPollForTests)
+    {
+        try
+        {
+            while (!boundToken.IsCancellationRequested)
+            {
+                onPollForTests?.Invoke();
+
+                if (File.Exists(finalMessagePath))
+                {
+                    await watcherOwnedCts.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                await Task.Delay(pollInterval, boundToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // boundToken ended (the process run concluded, or the caller/guard cancelled) before the
+            // artifact appeared. The sentinel's job is done either way.
+        }
+    }
+
+    /// <summary>
+    /// Builds the SUCCESS result for the codex-exec-hang case (T-2026-07-02-01): the sentinel
+    /// confirmed <paramref name="finalMessagePath"/> landed and force-cancelled the still-running
+    /// process, so no exit code was ever produced. The stdout/stderr/JSONL stream that
+    /// <see cref="SystemProcessRunner"/> was buffering is discarded on cancellation (it never returns
+    /// a <see cref="ProcessRunResult"/> for a cancelled run), so this writes honest empty stubs for
+    /// those artifacts rather than fabricating captured output; the exit code is normalized to 0 and
+    /// thread id/usage stay null since they can only be parsed from the (unavailable) JSONL stream.
+    /// </summary>
+    private static async Task<HarnessLaunchResult> BuildSentinelSuccessResultAsync(
+        HarnessCapability capability,
+        string finalMessagePath,
+        string rawEventStreamPath,
+        string stdoutPath,
+        string stderrPath,
+        string startedAt,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(rawEventStreamPath))
+            await File.WriteAllTextAsync(rawEventStreamPath, string.Empty, cancellationToken).ConfigureAwait(false);
+        if (!File.Exists(stdoutPath))
+            await File.WriteAllTextAsync(stdoutPath, string.Empty, cancellationToken).ConfigureAwait(false);
+        if (!File.Exists(stderrPath))
+            await File.WriteAllTextAsync(stderrPath, string.Empty, cancellationToken).ConfigureAwait(false);
+
+        return new HarnessLaunchResult
+        {
+            Capability = capability,
+            Succeeded = true,
+            ExitCode = 0,
+            FailureReason = null,
+            StartedAt = startedAt,
+            CompletedAt = DateTime.UtcNow.ToString("o"),
+            Artifacts = new HarnessArtifacts(rawEventStreamPath, finalMessagePath, stdoutPath, stderrPath),
+            ThreadId = null,
+            Usage = null,
         };
     }
 
