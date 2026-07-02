@@ -421,14 +421,11 @@ public sealed class CronCostLookup(string telemetryDbPath)
         if (externalPricing is null)
             return null;
 
-        var pricingById = new Dictionary<string, ModelPricing>(StringComparer.OrdinalIgnoreCase);
-        foreach (var m in externalPricing.Models)
-            pricingById[m.Id] = m;
-
         decimal total = 0m;
         foreach (var (model, buckets) in perModel)
         {
-            if (!pricingById.TryGetValue(model, out var rate))
+            var rate = ModelIdNormalizer.LookupExternalOnly(model, externalPricing);
+            if (rate is null)
             {
                 Log.Debug(
                     "Cron cost lookup: model {Model} has no exact pricing entry; will try estimation fallback.",
@@ -468,7 +465,7 @@ public sealed class CronCostLookup(string telemetryDbPath)
             using var e = perModel.GetEnumerator();
             e.MoveNext();
             var (singleModel, singleBuckets) = e.Current;
-            pricingById.TryGetValue(singleModel, out var singleRate);
+            var singleRate = ModelIdNormalizer.LookupExternalOnly(singleModel, externalPricing);
             if (singleRate is not null)
             {
                 // decimal rates + component costs (T-2026-06-20-20 Piece 2): the CostBreakdown DTO carries
