@@ -650,7 +650,12 @@ function SharedCronFields({
             inputMode="numeric"
             autoComplete="off"
             placeholder="e.g. 20000"
+            aria-describedby={id('budget-help')}
           />
+          <p id={id('budget-help')} className={styles.help}>
+            Best-effort: Scope stops starting new model calls at this budget, but a call already
+            in progress finishes, so actual spend can exceed it by up to one model call.
+          </p>
         </div>
       </div>
 
@@ -1436,7 +1441,7 @@ function AgentRow({ agent, layout = 'table', onChanged, ianaZone, harnessOptions
                 <dd><code className={styles.code}>{agent.model ?? 'harness default'}</code></dd>
               </div>
               <div className={styles.runConfirmRow}>
-                <dt>Token budget</dt>
+                <dt>Token budget (best-effort)</dt>
                 <dd><code className={styles.code}>{agent.token_budget != null ? String(agent.token_budget) : 'unbounded/default'}</code></dd>
               </div>
               <div className={styles.runConfirmRow}>
@@ -2073,7 +2078,7 @@ export function CronAgentDetail({ agentId }: CronAgentDetailProps) {
             <dd><code className={styles.code}>{agent.model ?? 'harness default'}</code></dd>
           </div>
           <div className={styles.detailConfigRow}>
-            <dt>Token budget</dt>
+            <dt>Token budget (best-effort)</dt>
             <dd><code className={styles.code}>{agent.token_budget != null ? String(agent.token_budget) : 'unbounded/default'}</code></dd>
           </div>
           <div className={styles.detailConfigRow}>
@@ -2436,7 +2441,7 @@ function AgentDetailActions({ agent, onChanged, onRemoved }: AgentDetailActionsP
                 <dd><code className={styles.code}>{agent.model ?? 'harness default'}</code></dd>
               </div>
               <div className={styles.runConfirmRow}>
-                <dt>Token budget</dt>
+                <dt>Token budget (best-effort)</dt>
                 <dd><code className={styles.code}>{agent.token_budget != null ? String(agent.token_budget) : 'unbounded/default'}</code></dd>
               </div>
               <div className={styles.runConfirmRow}>
