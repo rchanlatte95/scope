@@ -22,7 +22,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 version     INTEGER PRIMARY KEY,
                 applied_at  TEXT NOT NULL,
                 description TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_requests (
                 id                TEXT PRIMARY KEY,
@@ -38,7 +38,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 total_elapsed_ms  INTEGER,
                 created_at        TEXT NOT NULL,
                 completed_at      TEXT
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_request_stages (
                 id            TEXT PRIMARY KEY,
@@ -48,7 +48,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 elapsed_ms    INTEGER NOT NULL,
                 metadata_json TEXT,
                 created_at    TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_retrieval_results (
                 id              TEXT PRIMARY KEY,
@@ -60,7 +60,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 is_exact_match  INTEGER NOT NULL DEFAULT 0,
                 boosts_applied  TEXT NOT NULL DEFAULT '',
                 created_at      TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_packing_metrics (
                 id                   TEXT PRIMARY KEY,
@@ -82,7 +82,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 target_token_count   INTEGER NOT NULL,
                 context_token_count  INTEGER NOT NULL,
                 created_at           TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_cost_estimates (
                 id                      TEXT PRIMARY KEY,
@@ -95,7 +95,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 output_cost_usd         REAL NOT NULL,
                 total_cost_usd          REAL NOT NULL,
                 created_at              TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_agent_sessions (
                 session_key   TEXT PRIMARY KEY,
@@ -104,7 +104,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 first_seen_at TEXT NOT NULL,
                 last_seen_at  TEXT NOT NULL,
                 request_count INTEGER NOT NULL DEFAULT 0
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_agent_events (
                 id              TEXT PRIMARY KEY,
@@ -113,7 +113,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 event_type      TEXT NOT NULL,
                 event_data_json TEXT,
                 created_at      TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_payloads (
                 id           TEXT PRIMARY KEY,
@@ -123,7 +123,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 payload_text TEXT NOT NULL,
                 token_count  INTEGER,
                 created_at   TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE INDEX IF NOT EXISTS idx_obsreq_surface   ON obs_requests(caller_surface);
             CREATE INDEX IF NOT EXISTS idx_obsreq_operation  ON obs_requests(operation);
@@ -160,7 +160,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 label        TEXT,
                 created_at   TEXT NOT NULL,
                 completed_at TEXT
-            );
+            ) STRICT;
             CREATE INDEX IF NOT EXISTS idx_obsdisp_session ON obs_dispatches(session_key);
             """;
         cmd.ExecuteNonQueryRetrying();
@@ -201,7 +201,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 input_summary   TEXT,
                 output_summary  TEXT,
                 status          TEXT NOT NULL DEFAULT 'active'
-            );
+            ) STRICT;
             CREATE INDEX IF NOT EXISTS idx_obsspan_session ON obs_agent_spans(session_key);
             CREATE INDEX IF NOT EXISTS idx_obsspan_dispatch ON obs_agent_spans(dispatch_id);
             CREATE INDEX IF NOT EXISTS idx_obsspan_parent ON obs_agent_spans(parent_span_id);
@@ -492,7 +492,7 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
                 opened_at        TEXT NOT NULL,
                 open_source      TEXT,
                 PRIMARY KEY (base_session_key, cc_session_id)
-            );
+            ) STRICT;
             CREATE UNIQUE INDEX IF NOT EXISTS idx_obssessgen_effective
                 ON obs_session_generations(base_session_key, generation);
             """;
@@ -768,18 +768,453 @@ public class ObservabilitySchemaManager(SqliteConnection connection)
             CREATE TABLE IF NOT EXISTS obs_conversations (
                 scope_conversation_id TEXT PRIMARY KEY,
                 machine_id            TEXT NOT NULL,
-                created_at            TEXT NOT NULL);
+                created_at            TEXT NOT NULL) STRICT;
 
             CREATE TABLE IF NOT EXISTS obs_conversation_bindings (
                 machine_id            TEXT NOT NULL,
                 stem                  TEXT NOT NULL,
                 scope_conversation_id TEXT NOT NULL,
                 bound_at              TEXT NOT NULL,
-                PRIMARY KEY (machine_id, stem));
+                PRIMARY KEY (machine_id, stem)) STRICT;
             """;
         tablesCmd.ExecuteNonQueryRetrying();
 
         InsertSchemaVersion(18, "scope_conversation_id column + index on obs_agent_sessions; obs_conversations + obs_conversation_bindings tables (T-2026-06-23-01 ST-06)");
+        MigrateToV19();
+    }
+
+    /// <summary>
+    /// STRICT conversion (T-2026-07-12-01, hard rule owner 2026-07-12): recreates every obs_* table
+    /// (obs_schema_versions, obs_requests, obs_request_stages, obs_retrieval_results,
+    /// obs_packing_metrics, obs_cost_estimates, obs_agent_sessions, obs_agent_events, obs_payloads,
+    /// obs_dispatches, obs_agent_spans, obs_session_generations, obs_conversations,
+    /// obs_conversation_bindings) as STRICT, plus the legacy retrieval_requests/retrieval_results
+    /// tables owned by <see cref="TelemetrySchemaManager"/> (which has no version ledger of its own, so
+    /// this is the only place a pre-existing non-STRICT copy of those two tables is ever converted;
+    /// <see cref="StrictTableMigrator.Recreate"/> no-ops when a table does not exist on this
+    /// connection, since a pure-observability writer may never have run <see cref="TelemetrySchemaManager"/>).
+    /// <para>
+    /// Idempotency guard: this method is called UNCONDITIONALLY from the tail of every
+    /// <see cref="MigrateToV18"/> call (the V2..V18 chain runs on every <see cref="EnsureSchema"/>
+    /// invocation, i.e. on every telemetry write). <see cref="V19NeedsRecreate"/> probes all 16 table
+    /// names with a cheap <c>PRAGMA table_list</c> read each (no DDL) and only opens the
+    /// transaction/PRAGMA foreign_keys machinery when at least one of them still needs converting.
+    /// A single-anchor check (e.g. "obs_requests alone") is UNSOUND here and was deliberately rejected:
+    /// a partial/synthetic old-shape db (as several schema-migration unit tests build to simulate a
+    /// pre-vN live db) can be missing a table this method treats as core -- that missing table gets
+    /// created STRICT for the first time by the unconditional `CREATE TABLE IF NOT EXISTS ... STRICT`
+    /// earlier in this same call, which would make a single-table anchor probe report "already
+    /// migrated" while sibling tables that DID pre-exist (non-STRICT) are silently skipped. Checking
+    /// every table's own existence+strict state removes that failure mode. This guard is still
+    /// LOAD-BEARING for the expensive part: without it, every write would re-run the full multi-table
+    /// recreate+copy (the per-table probes here are metadata-only and cheap by comparison, and
+    /// <see cref="StrictTableMigrator.Recreate"/> repeats the same cheap per-table check internally, so
+    /// this outer check is purely an optimization to skip opening the transaction at all).
+    /// </para>
+    /// <para>
+    /// Retry posture: <see cref="StrictTableMigrator.Recreate"/> runs bare (non-retrying) statements;
+    /// the WHOLE transaction is wrapped as a single <see cref="SqliteRetry"/> unit (not the individual
+    /// statements) because a BUSY/LOCKED failure rolls the transaction back first, so retrying the
+    /// entire sequence from scratch cannot double-apply. This is the same posture as
+    /// <see cref="WireCallSchemaManager"/>'s v4 STRICT step and <see cref="CronSchemaManager"/>'s v8
+    /// STRICT step.
+    /// </para>
+    /// </summary>
+    private void MigrateToV19()
+    {
+        if (V19NeedsRecreate())
+        {
+            using (var offCmd = connection.CreateCommand())
+            {
+                offCmd.CommandText = "PRAGMA foreign_keys = OFF;";
+                offCmd.ExecuteNonQueryRetrying();
+            }
+
+            try
+            {
+                SqliteRetry.Execute(RunV19RecreateTransaction);
+            }
+            finally
+            {
+                using var onCmd = connection.CreateCommand();
+                onCmd.CommandText = "PRAGMA foreign_keys = ON;";
+                onCmd.ExecuteNonQueryRetrying();
+            }
+        }
+
+        InsertSchemaVersion(19, "STRICT conversion: all obs_* tables plus retrieval_requests/retrieval_results recreated STRICT (T-2026-07-12-01)");
+    }
+
+    /// <summary>Every table touched by the v19 STRICT recreate (see <see cref="RunV19RecreateTransaction"/>).</summary>
+    private static readonly string[] V19Tables =
+    [
+        "obs_schema_versions", "obs_requests", "obs_request_stages", "obs_retrieval_results",
+        "obs_packing_metrics", "obs_cost_estimates", "obs_agent_sessions", "obs_agent_events",
+        "obs_payloads", "obs_dispatches", "obs_agent_spans", "obs_session_generations",
+        "obs_conversations", "obs_conversation_bindings", "retrieval_requests", "retrieval_results",
+    ];
+
+    /// <summary>
+    /// Returns true when at least one of <see cref="V19Tables"/> exists but is not yet STRICT. See the
+    /// idempotency-guard remarks on <see cref="MigrateToV19"/> for why this checks every table instead
+    /// of a single anchor.
+    /// </summary>
+    private bool V19NeedsRecreate()
+    {
+        foreach (var table in V19Tables)
+        {
+            if (StrictTableMigrator.TableExists(connection, table) && !StrictTableMigrator.IsStrict(connection, table))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Runs the v19 multi-table recreate inside one BEGIN/COMMIT transaction. Every table is
+    /// individually guarded by <see cref="StrictTableMigrator.Recreate"/> (no-op if already STRICT or
+    /// absent), so calling this on a partially-migrated db only touches what still needs converting.
+    /// All 16 NULL-PK-checked tables here are best-effort observability/retrieval telemetry (never
+    /// cron_runs/wire_calls), so every one uses <see cref="NullPkPolicy.SkipAndWarn"/>: a NULL-PK row
+    /// is already unreadable by the app, and this runs on the write path, so it must never hard-throw.
+    /// </summary>
+    private void RunV19RecreateTransaction()
+    {
+        using (var beginCmd = connection.CreateCommand())
+        {
+            beginCmd.CommandText = "BEGIN TRANSACTION;";
+            beginCmd.ExecuteNonQuery();
+        }
+
+        try
+        {
+            StrictTableMigrator.Recreate(connection, "obs_schema_versions",
+                """
+                CREATE TABLE obs_schema_versions_new (
+                    version     INTEGER PRIMARY KEY,
+                    applied_at  TEXT NOT NULL,
+                    description TEXT NOT NULL
+                ) STRICT;
+                """,
+                "version, applied_at, description", pkColumn: null, NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_requests",
+                """
+                CREATE TABLE obs_requests_new (
+                    id                TEXT PRIMARY KEY,
+                    parent_request_id TEXT,
+                    caller_surface    TEXT NOT NULL,
+                    operation         TEXT NOT NULL,
+                    agent_session_key TEXT,
+                    query_text        TEXT,
+                    parameters_json   TEXT,
+                    status            TEXT NOT NULL DEFAULT 'started',
+                    exit_code         INTEGER,
+                    error_message     TEXT,
+                    total_elapsed_ms  INTEGER,
+                    created_at        TEXT NOT NULL,
+                    completed_at      TEXT,
+                    dispatch_id       TEXT
+                ) STRICT;
+                """,
+                """
+                id, parent_request_id, caller_surface, operation, agent_session_key, query_text,
+                parameters_json, status, exit_code, error_message, total_elapsed_ms, created_at,
+                completed_at, dispatch_id
+                """,
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_request_stages",
+                """
+                CREATE TABLE obs_request_stages_new (
+                    id            TEXT PRIMARY KEY,
+                    request_id    TEXT NOT NULL REFERENCES obs_requests(id),
+                    stage_name    TEXT NOT NULL,
+                    stage_order   INTEGER NOT NULL,
+                    elapsed_ms    INTEGER NOT NULL,
+                    metadata_json TEXT,
+                    created_at    TEXT NOT NULL
+                ) STRICT;
+                """,
+                "id, request_id, stage_name, stage_order, elapsed_ms, metadata_json, created_at",
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_retrieval_results",
+                """
+                CREATE TABLE obs_retrieval_results_new (
+                    id              TEXT PRIMARY KEY,
+                    request_id      TEXT NOT NULL REFERENCES obs_requests(id),
+                    document_key    TEXT NOT NULL,
+                    rank            INTEGER NOT NULL,
+                    score           REAL NOT NULL,
+                    provider_source TEXT NOT NULL,
+                    is_exact_match  INTEGER NOT NULL DEFAULT 0,
+                    boosts_applied  TEXT NOT NULL DEFAULT '',
+                    created_at      TEXT NOT NULL
+                ) STRICT;
+                """,
+                """
+                id, request_id, document_key, rank, score, provider_source, is_exact_match,
+                boosts_applied, created_at
+                """,
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_packing_metrics",
+                """
+                CREATE TABLE obs_packing_metrics_new (
+                    id                   TEXT PRIMARY KEY,
+                    request_id           TEXT NOT NULL REFERENCES obs_requests(id),
+                    target_fqn           TEXT NOT NULL,
+                    budget_requested     INTEGER NOT NULL,
+                    budget_used          INTEGER NOT NULL,
+                    budget_remaining     INTEGER NOT NULL,
+                    symbols_considered   INTEGER NOT NULL,
+                    symbols_included     INTEGER NOT NULL,
+                    symbols_rejected     INTEGER NOT NULL,
+                    compression_ct       INTEGER NOT NULL,
+                    full_body_ct         INTEGER NOT NULL,
+                    signature_only_ct    INTEGER NOT NULL,
+                    call_site_ct         INTEGER NOT NULL,
+                    dedup_removed_ct     INTEGER NOT NULL,
+                    free_symbol_ct       INTEGER NOT NULL,
+                    test_callers_capped  INTEGER NOT NULL DEFAULT 0,
+                    target_token_count   INTEGER NOT NULL,
+                    context_token_count  INTEGER NOT NULL,
+                    created_at           TEXT NOT NULL
+                ) STRICT;
+                """,
+                """
+                id, request_id, target_fqn, budget_requested, budget_used, budget_remaining,
+                symbols_considered, symbols_included, symbols_rejected, compression_ct, full_body_ct,
+                signature_only_ct, call_site_ct, dedup_removed_ct, free_symbol_ct, test_callers_capped,
+                target_token_count, context_token_count, created_at
+                """,
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_cost_estimates",
+                """
+                CREATE TABLE obs_cost_estimates_new (
+                    id                      TEXT PRIMARY KEY,
+                    request_id              TEXT NOT NULL REFERENCES obs_requests(id),
+                    model_id                TEXT NOT NULL,
+                    provider                TEXT NOT NULL,
+                    input_tokens            INTEGER NOT NULL,
+                    estimated_output_tokens INTEGER NOT NULL,
+                    input_cost_usd          REAL NOT NULL,
+                    output_cost_usd         REAL NOT NULL,
+                    total_cost_usd          REAL NOT NULL,
+                    created_at              TEXT NOT NULL
+                ) STRICT;
+                """,
+                """
+                id, request_id, model_id, provider, input_tokens, estimated_output_tokens,
+                input_cost_usd, output_cost_usd, total_cost_usd, created_at
+                """,
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_agent_sessions",
+                """
+                CREATE TABLE obs_agent_sessions_new (
+                    session_key           TEXT PRIMARY KEY,
+                    agent_type            TEXT NOT NULL,
+                    agent_subtype         TEXT NOT NULL,
+                    first_seen_at         TEXT NOT NULL,
+                    last_seen_at          TEXT NOT NULL,
+                    request_count         INTEGER NOT NULL DEFAULT 0,
+                    parent_session_key    TEXT,
+                    origin                TEXT,
+                    deleted_at            TEXT,
+                    base_session_key      TEXT,
+                    generation            INTEGER,
+                    conversation_id       TEXT,
+                    machine_id            TEXT,
+                    cc_session_id         TEXT,
+                    scope_conversation_id TEXT
+                ) STRICT;
+                """,
+                """
+                session_key, agent_type, agent_subtype, first_seen_at, last_seen_at, request_count,
+                parent_session_key, origin, deleted_at, base_session_key, generation, conversation_id,
+                machine_id, cc_session_id, scope_conversation_id
+                """,
+                pkColumn: "session_key", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_agent_events",
+                """
+                CREATE TABLE obs_agent_events_new (
+                    id              TEXT PRIMARY KEY,
+                    session_key     TEXT NOT NULL REFERENCES obs_agent_sessions(session_key),
+                    request_id      TEXT REFERENCES obs_requests(id),
+                    event_type      TEXT NOT NULL,
+                    event_data_json TEXT,
+                    created_at      TEXT NOT NULL,
+                    span_id         TEXT,
+                    event_subtype   TEXT,
+                    content_hash    TEXT,
+                    turn_index      INTEGER,
+                    status          TEXT,
+                    tool_use_id     TEXT
+                ) STRICT;
+                """,
+                """
+                id, session_key, request_id, event_type, event_data_json, created_at, span_id,
+                event_subtype, content_hash, turn_index, status, tool_use_id
+                """,
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_payloads",
+                """
+                CREATE TABLE obs_payloads_new (
+                    id           TEXT PRIMARY KEY,
+                    request_id   TEXT NOT NULL REFERENCES obs_requests(id),
+                    direction    TEXT NOT NULL CHECK(direction IN ('inbound','outbound')),
+                    content_type TEXT NOT NULL,
+                    payload_text TEXT NOT NULL,
+                    token_count  INTEGER,
+                    created_at   TEXT NOT NULL
+                ) STRICT;
+                """,
+                "id, request_id, direction, content_type, payload_text, token_count, created_at",
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_dispatches",
+                """
+                CREATE TABLE obs_dispatches_new (
+                    id           TEXT PRIMARY KEY,
+                    session_key  TEXT,
+                    label        TEXT,
+                    created_at   TEXT NOT NULL,
+                    completed_at TEXT
+                ) STRICT;
+                """,
+                "id, session_key, label, created_at, completed_at",
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_agent_spans",
+                """
+                CREATE TABLE obs_agent_spans_new (
+                    id                    TEXT PRIMARY KEY,
+                    session_key           TEXT NOT NULL,
+                    dispatch_id           TEXT,
+                    parent_span_id        TEXT,
+                    agent_type            TEXT NOT NULL,
+                    agent_name            TEXT NOT NULL,
+                    started_at            TEXT NOT NULL,
+                    completed_at          TEXT,
+                    input_summary         TEXT,
+                    output_summary        TEXT,
+                    status                TEXT NOT NULL DEFAULT 'active',
+                    agent_ref             TEXT,
+                    total_tokens          INTEGER,
+                    input_tokens          INTEGER,
+                    output_tokens         INTEGER,
+                    pinned_cost_usd       REAL,
+                    pinned_model_id       TEXT,
+                    pinned_prices_as_of   TEXT,
+                    pinned_breakdown_json TEXT,
+                    model                 TEXT
+                ) STRICT;
+                """,
+                """
+                id, session_key, dispatch_id, parent_span_id, agent_type, agent_name, started_at,
+                completed_at, input_summary, output_summary, status, agent_ref, total_tokens,
+                input_tokens, output_tokens, pinned_cost_usd, pinned_model_id, pinned_prices_as_of,
+                pinned_breakdown_json, model
+                """,
+                pkColumn: "id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_session_generations",
+                """
+                CREATE TABLE obs_session_generations_new (
+                    base_session_key TEXT NOT NULL,
+                    cc_session_id    TEXT NOT NULL,
+                    generation       INTEGER NOT NULL,
+                    effective_key    TEXT NOT NULL,
+                    opened_at        TEXT NOT NULL,
+                    open_source      TEXT,
+                    PRIMARY KEY (base_session_key, cc_session_id)
+                ) STRICT;
+                """,
+                "base_session_key, cc_session_id, generation, effective_key, opened_at, open_source",
+                pkColumn: null, NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_conversations",
+                """
+                CREATE TABLE obs_conversations_new (
+                    scope_conversation_id TEXT PRIMARY KEY,
+                    machine_id            TEXT NOT NULL,
+                    created_at            TEXT NOT NULL
+                ) STRICT;
+                """,
+                "scope_conversation_id, machine_id, created_at",
+                pkColumn: "scope_conversation_id", NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "obs_conversation_bindings",
+                """
+                CREATE TABLE obs_conversation_bindings_new (
+                    machine_id            TEXT NOT NULL,
+                    stem                  TEXT NOT NULL,
+                    scope_conversation_id TEXT NOT NULL,
+                    bound_at              TEXT NOT NULL,
+                    PRIMARY KEY (machine_id, stem)
+                ) STRICT;
+                """,
+                "machine_id, stem, scope_conversation_id, bound_at",
+                pkColumn: null, NullPkPolicy.SkipAndWarn);
+
+            // Legacy tables owned by TelemetrySchemaManager, which has no version ledger of its own.
+            // Recreate.no-ops when the table does not exist on this connection (a pure-observability
+            // writer may never have run TelemetrySchemaManager here).
+            StrictTableMigrator.Recreate(connection, "retrieval_requests",
+                """
+                CREATE TABLE retrieval_requests_new (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query_text       TEXT NOT NULL,
+                    mode             TEXT NOT NULL CHECK(mode IN ('Lexical','Semantic','Hybrid')),
+                    providers_used   TEXT NOT NULL,
+                    result_count     INTEGER NOT NULL,
+                    total_candidates INTEGER NOT NULL,
+                    latency_ms       INTEGER NOT NULL,
+                    caller_surface   TEXT NOT NULL CHECK(caller_surface IN ('Cli','Mcp','Server','Test','Benchmark')),
+                    created_at       TEXT NOT NULL
+                ) STRICT;
+                """,
+                """
+                id, query_text, mode, providers_used, result_count, total_candidates, latency_ms,
+                caller_surface, created_at
+                """,
+                pkColumn: null, NullPkPolicy.SkipAndWarn);
+
+            StrictTableMigrator.Recreate(connection, "retrieval_results",
+                """
+                CREATE TABLE retrieval_results_new (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id      INTEGER NOT NULL REFERENCES retrieval_requests(id) ON DELETE CASCADE,
+                    document_key    TEXT NOT NULL,
+                    rank            INTEGER NOT NULL,
+                    score           REAL NOT NULL,
+                    provider_source TEXT NOT NULL CHECK(provider_source IN ('Lexical','Semantic','Hybrid')),
+                    is_exact_match  INTEGER NOT NULL DEFAULT 0,
+                    boosts_applied  TEXT NOT NULL DEFAULT '',
+                    created_at      TEXT NOT NULL
+                ) STRICT;
+                """,
+                """
+                id, request_id, document_key, rank, score, provider_source, is_exact_match,
+                boosts_applied, created_at
+                """,
+                pkColumn: null, NullPkPolicy.SkipAndWarn);
+
+            using var commitCmd = connection.CreateCommand();
+            commitCmd.CommandText = "COMMIT;";
+            commitCmd.ExecuteNonQuery();
+        }
+        catch
+        {
+            using var rollbackCmd = connection.CreateCommand();
+            rollbackCmd.CommandText = "ROLLBACK;";
+            rollbackCmd.ExecuteNonQuery();
+            throw;
+        }
     }
 
     private void InsertSchemaVersion(int version, string description)

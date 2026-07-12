@@ -17,7 +17,7 @@ using System.Globalization;
 public class WireCallSchemaManager(SqliteConnection connection)
 {
     /// <summary>The newest wire schema version this manager knows how to produce.</summary>
-    private const int LatestVersion = 3;
+    private const int LatestVersion = 4;
 
     /// <summary>
     /// Ensures the wire metering tables and indexes exist and the schema is at <see cref="LatestVersion"/>.
@@ -39,6 +39,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
 
         MigrateToV2();
         MigrateToV3();
+        MigrateToV4();
     }
 
     private void EnsureVersionTable()
@@ -49,7 +50,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
                 version     INTEGER PRIMARY KEY,
                 applied_at  TEXT NOT NULL,
                 description TEXT NOT NULL
-            );
+            ) STRICT;
             """;
         cmd.ExecuteNonQueryRetrying();
     }
@@ -96,7 +97,7 @@ public class WireCallSchemaManager(SqliteConnection connection)
                 cc_agent_id           TEXT,
                 cc_parent_agent_id    TEXT,
                 source                TEXT NOT NULL DEFAULT 'proxy'
-            );
+            ) STRICT;
 
             CREATE INDEX IF NOT EXISTS idx_wire_started  ON wire_calls(started_at);
             CREATE INDEX IF NOT EXISTS idx_wire_model    ON wire_calls(model);
@@ -145,6 +146,122 @@ public class WireCallSchemaManager(SqliteConnection connection)
         AddColumnIfMissing("source");
 
         InsertSchemaVersion(3, "Row provenance: source ('proxy' | 'transcript') on wire_calls");
+    }
+
+    /// <summary>
+    /// STRICT conversion (T-2026-07-12-01, hard rule owner 2026-07-12): recreates <c>wire_calls</c> and
+    /// <c>wire_schema_versions</c> as STRICT. <c>wire_calls</c> carries immutable financial rows (exact
+    /// wire cost, tokens, provenance), so a pre-existing NULL-PK row (legal only in the old non-STRICT
+    /// shape, since a bare TEXT PRIMARY KEY does not imply NOT NULL) is a fail-loud condition: never
+    /// silently dropped, see <see cref="NullPkPolicy.Throw"/>. <c>wire_schema_versions</c> has no
+    /// NULL-PK risk (INTEGER PRIMARY KEY rowid alias) and is copied straight.
+    /// <para>
+    /// Retry posture: <see cref="StrictTableMigrator.Recreate"/> runs bare (non-retrying) statements
+    /// inside one BEGIN/COMMIT transaction; the WHOLE transaction is wrapped as a single
+    /// <see cref="SqliteRetry"/> unit below (not the individual statements) because a BUSY/LOCKED
+    /// failure rolls the transaction back first, so retrying the entire sequence from scratch cannot
+    /// double-apply. <see cref="StrictTableMigrator.IsStrict"/> makes this a single cheap probe on
+    /// every call once migrated (this method still runs unconditionally as part of the version-gated
+    /// EnsureSchema chain, but does no DDL once both tables are STRICT).
+    /// </para>
+    /// </summary>
+    private void MigrateToV4()
+    {
+        using (var offCmd = connection.CreateCommand())
+        {
+            offCmd.CommandText = "PRAGMA foreign_keys = OFF;";
+            offCmd.ExecuteNonQueryRetrying();
+        }
+
+        try
+        {
+            SqliteRetry.Execute(() =>
+            {
+                using var beginCmd = connection.CreateCommand();
+                beginCmd.CommandText = "BEGIN TRANSACTION;";
+                beginCmd.ExecuteNonQuery();
+
+                try
+                {
+                    StrictTableMigrator.Recreate(
+                        connection,
+                        "wire_schema_versions",
+                        """
+                        CREATE TABLE wire_schema_versions_new (
+                            version     INTEGER PRIMARY KEY,
+                            applied_at  TEXT NOT NULL,
+                            description TEXT NOT NULL
+                        ) STRICT;
+                        """,
+                        "version, applied_at, description",
+                        pkColumn: null,
+                        NullPkPolicy.Throw);
+
+                    StrictTableMigrator.Recreate(
+                        connection,
+                        "wire_calls",
+                        """
+                        CREATE TABLE wire_calls_new (
+                            id                    TEXT PRIMARY KEY,
+                            started_at            TEXT NOT NULL,
+                            ttft_ms               INTEGER,
+                            total_ms              INTEGER NOT NULL,
+                            endpoint              TEXT NOT NULL,
+                            status                INTEGER NOT NULL,
+                            stream                INTEGER NOT NULL DEFAULT 0,
+                            model                 TEXT,
+                            message_id            TEXT,
+                            stop_reason           TEXT,
+                            input_tokens          INTEGER,
+                            output_tokens         INTEGER,
+                            cache_creation_tokens INTEGER,
+                            cache_read_tokens     INTEGER,
+                            tool_use_ids          TEXT,
+                            system_hash           TEXT,
+                            first_user_hash       TEXT,
+                            message_count         INTEGER,
+                            request_bytes         INTEGER NOT NULL DEFAULT 0,
+                            response_bytes        INTEGER NOT NULL DEFAULT 0,
+                            machine_id            TEXT,
+                            workspace_id          TEXT,
+                            org_id                TEXT,
+                            cc_session_id         TEXT,
+                            cc_agent_id           TEXT,
+                            cc_parent_agent_id    TEXT,
+                            source                TEXT NOT NULL DEFAULT 'proxy'
+                        ) STRICT;
+                        """,
+                        """
+                        id, started_at, ttft_ms, total_ms, endpoint, status, stream, model, message_id,
+                        stop_reason, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+                        tool_use_ids, system_hash, first_user_hash, message_count, request_bytes,
+                        response_bytes, machine_id, workspace_id, org_id, cc_session_id, cc_agent_id,
+                        cc_parent_agent_id, source
+                        """,
+                        pkColumn: "id",
+                        NullPkPolicy.Throw);
+
+                    using var commitCmd = connection.CreateCommand();
+                    commitCmd.CommandText = "COMMIT;";
+                    commitCmd.ExecuteNonQuery();
+                }
+                catch
+                {
+                    using var rollbackCmd = connection.CreateCommand();
+                    rollbackCmd.CommandText = "ROLLBACK;";
+                    rollbackCmd.ExecuteNonQuery();
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            using var onCmd = connection.CreateCommand();
+            onCmd.CommandText = "PRAGMA foreign_keys = ON;";
+            onCmd.ExecuteNonQueryRetrying();
+        }
+
+        InsertSchemaVersion(4, "STRICT conversion: wire_calls + wire_schema_versions recreated STRICT (T-2026-07-12-01)");
     }
 
     private void AddColumnIfMissing(string column)

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Scope.Core.Utilities;
 
 namespace Scope.Core.Cron;
 
@@ -67,7 +68,7 @@ public sealed class CronSchemaManager(SqliteConnection connection)
                 version     INTEGER PRIMARY KEY,
                 applied_at  TEXT NOT NULL,
                 description TEXT NOT NULL
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS cron_agents (
                 id           TEXT PRIMARY KEY,
@@ -83,7 +84,7 @@ public sealed class CronSchemaManager(SqliteConnection connection)
                 updated_at   TEXT NOT NULL,
                 CHECK(token_budget IS NULL OR token_budget > 0),
                 CHECK(harness IN ('claude-code', 'codex'))
-            );
+            ) STRICT;
 
             CREATE TABLE IF NOT EXISTS cron_runs (
                 id               TEXT PRIMARY KEY,
@@ -97,7 +98,7 @@ public sealed class CronSchemaManager(SqliteConnection connection)
                 total_cost_usd   REAL,
                 skip_reason      TEXT,
                 error_message    TEXT
-            );
+            ) STRICT;
 
             CREATE INDEX IF NOT EXISTS idx_cron_agents_enabled ON cron_agents(enabled);
             CREATE INDEX IF NOT EXISTS idx_cron_runs_agent_started ON cron_runs(cron_agent_id, started_at);
@@ -151,6 +152,16 @@ public sealed class CronSchemaManager(SqliteConnection connection)
         // cron_schema_versions, NOT the main index SchemaVersion.Current.
         ApplyV7MeteringMisconfigured();
         InsertSchemaVersion(7, "metering_misconfigured column on cron_runs (F6)");
+
+        // v8: STRICT conversion (T-2026-07-12-01, hard rule owner 2026-07-12). NOT version-gated, like
+        // every other step in this method: it runs on every EnsureSchema call with its own idempotency
+        // guard (see ApplyV8Strict). cron_schema_versions' v1 CREATE already carries STRICT and is
+        // never recreated afterward, so this step is a genuine no-op there once migrated once; cron_runs
+        // and cron_agents ARE recreated by the byte-stable v5/v6 templates above on every fresh
+        // bootstrap (those templates are deliberately left non-STRICT so the shipped migrations stay
+        // byte-stable), so this step is the one place that guarantees their FINAL shape is STRICT.
+        ApplyV8Strict();
+        InsertSchemaVersion(8, "STRICT conversion: cron_schema_versions, cron_agents, cron_runs recreated STRICT (T-2026-07-12-01)");
     }
 
     /// <summary>
@@ -302,6 +313,159 @@ public sealed class CronSchemaManager(SqliteConnection connection)
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "ALTER TABLE cron_agents ADD COLUMN block_concurrent_runs INTEGER NOT NULL DEFAULT 1;";
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// STRICT conversion (T-2026-07-12-01, hard rule owner 2026-07-12): recreates
+    /// <c>cron_schema_versions</c>, <c>cron_agents</c>, and <c>cron_runs</c> as STRICT in one
+    /// transaction. Both <c>cron_agents.id</c> and <c>cron_runs.id</c> are treated as immutable/critical
+    /// (<see cref="NullPkPolicy.Throw"/> on a NULL primary key, never silently dropped): a lost
+    /// <c>cron_runs</c> row would erase an immutable financial record, and a lost <c>cron_agents</c> row
+    /// would silently delete a user's cron agent definition -- the audit that scoped this task groups
+    /// <c>cron_agents.id</c> in the same NULL-PK caveat as <c>cron_runs.id</c> and <c>wire_calls.id</c>,
+    /// and the safe reading of that grouping is the same fail-loud policy for all three.
+    /// <c>cron_schema_versions.version</c> is an INTEGER PRIMARY KEY rowid alias (never stored NULL) and
+    /// is copied straight. <see cref="StrictTableMigrator.Recreate"/> preserves the v5 FK
+    /// <c>ON DELETE RESTRICT</c> and the v6-widened status CHECK exactly (this method's CREATE
+    /// statements mirror the byte-stable v5/v6/v7 shape, just with STRICT appended and every column
+    /// through v7 included).
+    /// <para>
+    /// Retry posture matches <see cref="Telemetry.WireCallSchemaManager"/>'s v4 STRICT step: the WHOLE
+    /// transaction is wrapped as one <see cref="SqliteRetry"/> unit (not the individual bare statements
+    /// inside it) because a BUSY/LOCKED failure rolls the transaction back first, so retrying the entire
+    /// sequence from scratch cannot double-apply.
+    /// </para>
+    /// <para>
+    /// Idempotency: unlike the version-gated <c>WireCallSchemaManager</c>, this whole method (like every
+    /// other step in <c>EnsureSchema</c>) runs unconditionally on every call, so the pre-check below
+    /// probes all THREE tables' own existence+STRICT state before opening the transaction/PRAGMA
+    /// machinery at all, and skips entirely once none need it. A single-table anchor check would be
+    /// unsound here: cron_runs is recreated (non-STRICT) by the byte-stable v5/v6 templates on every
+    /// fresh bootstrap even though cron_agents and cron_schema_versions are STRICT from their v1 CREATE,
+    /// so an anchor on either of those two would wrongly report "already migrated" while cron_runs still
+    /// needs converting.
+    /// </para>
+    /// </summary>
+    private void ApplyV8Strict()
+    {
+        if (!V8NeedsRecreate())
+            return;
+
+        using (var offCmd = connection.CreateCommand())
+        {
+            offCmd.CommandText = "PRAGMA foreign_keys = OFF;";
+            offCmd.ExecuteNonQuery();
+        }
+
+        try
+        {
+            SqliteRetry.Execute(() =>
+            {
+                ExecuteNonQuery("BEGIN TRANSACTION;");
+                try
+                {
+                    StrictTableMigrator.Recreate(
+                        connection,
+                        "cron_schema_versions",
+                        """
+                        CREATE TABLE cron_schema_versions_new (
+                            version     INTEGER PRIMARY KEY,
+                            applied_at  TEXT NOT NULL,
+                            description TEXT NOT NULL
+                        ) STRICT;
+                        """,
+                        "version, applied_at, description",
+                        pkColumn: null,
+                        NullPkPolicy.Throw);
+
+                    StrictTableMigrator.Recreate(
+                        connection,
+                        "cron_agents",
+                        """
+                        CREATE TABLE cron_agents_new (
+                            id                    TEXT PRIMARY KEY,
+                            label                 TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                            schedule              TEXT NOT NULL,
+                            prompt                TEXT NOT NULL,
+                            repo_path             TEXT NOT NULL,
+                            harness               TEXT NOT NULL,
+                            model                 TEXT,
+                            token_budget          INTEGER,
+                            enabled               INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                            created_at            TEXT NOT NULL,
+                            updated_at            TEXT NOT NULL,
+                            block_concurrent_runs INTEGER NOT NULL DEFAULT 1,
+                            deleted_at            TEXT,
+                            max_runtime_seconds   INTEGER,
+                            CHECK(token_budget IS NULL OR token_budget > 0),
+                            CHECK(harness IN ('claude-code', 'codex'))
+                        ) STRICT;
+                        """,
+                        """
+                        id, label, schedule, prompt, repo_path, harness, model, token_budget, enabled,
+                        created_at, updated_at, block_concurrent_runs, deleted_at, max_runtime_seconds
+                        """,
+                        pkColumn: "id",
+                        NullPkPolicy.Throw);
+
+                    StrictTableMigrator.Recreate(
+                        connection,
+                        "cron_runs",
+                        """
+                        CREATE TABLE cron_runs_new (
+                            id                     TEXT PRIMARY KEY,
+                            cron_agent_id          TEXT NOT NULL REFERENCES cron_agents(id) ON DELETE RESTRICT,
+                            dispatch_id            TEXT,
+                            session_key            TEXT,
+                            started_at             TEXT NOT NULL,
+                            completed_at           TEXT,
+                            status                 TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'skipped', 'budget_exhausted')),
+                            exit_code              INTEGER,
+                            total_cost_usd         REAL,
+                            skip_reason            TEXT,
+                            error_message          TEXT,
+                            cost_provenance        TEXT,
+                            metering_misconfigured INTEGER
+                        ) STRICT;
+                        """,
+                        """
+                        id, cron_agent_id, dispatch_id, session_key, started_at, completed_at, status,
+                        exit_code, total_cost_usd, skip_reason, error_message, cost_provenance,
+                        metering_misconfigured
+                        """,
+                        pkColumn: "id",
+                        NullPkPolicy.Throw);
+
+                    ExecuteNonQuery("COMMIT;");
+                }
+                catch
+                {
+                    ExecuteNonQuery("ROLLBACK;");
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            using var onCmd = connection.CreateCommand();
+            onCmd.CommandText = "PRAGMA foreign_keys = ON;";
+            onCmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Returns true when at least one of cron_schema_versions, cron_agents, or cron_runs exists but is
+    /// not yet STRICT. See the idempotency remarks on <see cref="ApplyV8Strict"/> for why every table is
+    /// checked individually instead of a single anchor.
+    /// </summary>
+    private bool V8NeedsRecreate()
+    {
+        foreach (var table in (ReadOnlySpan<string>)["cron_schema_versions", "cron_agents", "cron_runs"])
+        {
+            if (StrictTableMigrator.TableExists(connection, table) && !StrictTableMigrator.IsStrict(connection, table))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
