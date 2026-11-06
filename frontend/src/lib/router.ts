@@ -17,20 +17,14 @@
 //   #/trace?selectedSession=KEY&detailTab=TAB&from=ISO&to=ISO  Trace view state (T-2026-06-16-18)
 //   #/cost-ledger               Cost Ledger
 //   #/cost-ledger?agent=KEY&tab=TAB&detailTab=TAB&from=ISO&to=ISO  Cost Ledger view state (T-2026-06-16-18)
-//   #/context-packs             Context Packs (internal/diagnostic only; neutralized in external builds)
 //   #/proof-paths               Proof Paths
-//   #/security-controls         Security Controls
-//   #/audit-log                 Audit Log
-//   #/org-uplink                Org Uplink
-//   #/billing                   Billing
 //   #/settings                  Settings (tabbed)
 //   #/settings?tab=accessibility Settings > Accessibility tab
 //
 // Unknown routes default to Command (not a crash).
 //
-// PP-15: In external builds (IS_EXTERNAL_BUILD=true, the default), #/context-packs
-// is treated as unknown and routes to Command. The ContextPacksView source is retained
-// for internal/diagnostic builds (set VITE_EXTERNAL_BUILD=false).
+// PP-15: In external builds (IS_EXTERNAL_BUILD=true, the default), gated routes are
+// treated as unknown and route to Command.
 // =============================================================================
 
 import { IS_EXTERNAL_BUILD, GATED_AREAS } from './buildFlags';
@@ -40,14 +34,8 @@ export type RouteName =
   | 'cron'
   | 'trace'
   | 'cost-ledger'
-  | 'context-packs'
   | 'proof-paths'
-  | 'security-controls'
-  | 'audit-log'
-  | 'org-uplink'
-  | 'billing'
-  | 'settings'
-  | 'test-drp';
+  | 'settings';
 
 /**
  * Valid sort keys for the cron agent table (T-2026-06-13-35).
@@ -185,21 +173,13 @@ const DEFAULT_ROUTE: Route = { name: 'command', id: null, session: null, tab: nu
 // isAreaAvailable() from buildFlags.ts.
 //
 // ALL_AREAS are the full set; in external builds we subtract GATED_AREAS.
-// The ContextPacksView source (and other gated views) are retained for use
-// in internal/diagnostic builds (VITE_EXTERNAL_BUILD=false).
 const ALL_AREAS: readonly RouteName[] = [
   'command',
   'cron',
   'trace',
   'cost-ledger',
-  'context-packs',
   'proof-paths',
-  'security-controls',
-  'audit-log',
-  'org-uplink',
-  'billing',
   'settings',
-  'test-drp',
 ];
 
 const KNOWN_AREAS: ReadonlySet<RouteName> = new Set<RouteName>(

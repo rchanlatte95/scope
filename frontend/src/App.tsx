@@ -5,17 +5,10 @@ import { CronAgentDetail } from './views/CronView';
 import CommandView from './views/CommandView';
 import SettingsView from './views/SettingsView';
 import CostLedgerView from './views/CostLedgerView';
-import ContextPacksView from './views/ContextPacksView';
 import ProofPathsView from './views/ProofPathsView';
-import SecurityControlsView from './views/SecurityControlsView';
-import AuditLogView from './views/AuditLogView';
-import OrgUplinkView from './views/OrgUplinkView';
-import BillingView from './views/BillingView';
-import { DateRangePickerHarness } from './views/DateRangePickerHarness';
 import { currentRoute, navigate, type Route, type RouteName } from './lib/router';
 import { isAreaAvailable } from './lib/buildFlags';
 import { ScopeLogo } from './components/ScopeLogo';
-import { ExportCsvButtonE2eFixture } from './views/ExportCsvButtonE2eFixture';
 import styles from './App.module.css';
 
 /**
@@ -36,11 +29,6 @@ import styles from './App.module.css';
  *   <CronView />                           (no props)
  *   <TraceView initialSession={session} /> (session from deep-link)
  *
- * PP-15 + T-2026-06-20-10: Five areas are gated in external builds (the default).
- * They are filtered from NAV_ITEMS via isAreaAvailable() and their routes are
- * neutralized in the router (GATED_AREAS in buildFlags.ts).
- * Gated: context-packs, security-controls, audit-log, org-uplink, billing.
- * Task A (CommandView) imports isAreaAvailable/GATED_AREAS to clean up dead links.
  *
  * T-2026-06-21-01: Nav glyph rendering updated to support either a string glyph
  * or an inline SVG ReactNode. Five glyphs swapped to finalized SVG assets:
@@ -122,23 +110,17 @@ interface NavItem {
 }
 
 // 11 top-level nav areas total. Order matches the IA in frontend-dev-guide.xml.
-// In external builds (default) the five GATED_AREAS are filtered out via
+// In external builds (default) the GATED_AREAS are filtered out via
 // isAreaAvailable(), leaving 6 visible nav items.
 //
 // T-2026-06-21-01: Command, Trace Sessions, Cost Ledger, Proof Paths, and Settings
-// now use inline SVG ReactNodes. Cron Agents, Context Packs, Security Controls,
-// Audit Log, Org Uplink, and Billing retain their existing string glyphs.
+// now use inline SVG ReactNodes. Cron Agents retains its string glyph.
 const ALL_NAV_ITEMS: NavItem[] = [
   { name: 'command',           label: 'Command',          glyph: CommandGlyph },
   { name: 'cron',              label: 'Cron Agents',      glyph: '◷' },
   { name: 'trace',             label: 'Trace Sessions',   glyph: TraceSessionsGlyph },
   { name: 'cost-ledger',       label: 'Cost Ledger',      glyph: CostLedgerGlyph },
-  { name: 'context-packs',     label: 'Context Packs',    glyph: '⊞' },
   { name: 'proof-paths',       label: 'Proof Paths',      glyph: ProofPathsGlyph },
-  { name: 'security-controls', label: 'Security Controls',glyph: '⚿' },
-  { name: 'audit-log',         label: 'Audit Log',        glyph: '☰' },
-  { name: 'org-uplink',        label: 'Org Uplink',       glyph: '↑' },
-  { name: 'billing',           label: 'Billing',          glyph: '◎' },
   { name: 'settings',          label: 'Settings',         glyph: SettingsGlyph },
 ];
 
@@ -163,14 +145,8 @@ function renderView(route: Route) {
       }
       return <TraceView initialSession={route.session ?? null} />;
     case 'cost-ledger':       return <CostLedgerView />;
-    case 'context-packs':     return <ContextPacksView />;
     case 'proof-paths':       return <ProofPathsView />;
-    case 'security-controls': return <SecurityControlsView />;
-    case 'audit-log':         return <AuditLogView />;
-    case 'org-uplink':        return <OrgUplinkView />;
-    case 'billing':           return <BillingView />;
     case 'settings':          return <SettingsView />;
-    case 'test-drp':          return <DateRangePickerHarness />;
     default:                  return <CommandView />;
   }
 }
@@ -179,7 +155,6 @@ function renderView(route: Route) {
 const NAV_LIST_ID = 'app-nav-list';
 
 export default function App() {
-  const [hash, setHash] = useState<string>(() => window.location.hash);
   const [route, setRoute] = useState<Route>(() => currentRoute());
   // Nav highlight uses the urgent `route` so the active inverse-fill paints
   // immediately on click; the (potentially heavy) destination view renders from
@@ -194,20 +169,11 @@ export default function App() {
 
   useEffect(() => {
     const onHashChange = () => {
-      setHash(window.location.hash);
       setRoute(currentRoute());
     };
     window.addEventListener('hashchange', onHashChange);
     return () => { window.removeEventListener('hashchange', onHashChange); };
   }, []);
-
-  // E2e test fixture route — only active in dev (not visible in nav).
-  // ST-01 Playwright spec navigates to /#/__e2e/export-csv to render ExportCsvButton
-  // in isolation with predictable data. The hash does NOT conflict with the typed
-  // RouteName union; this guard fires before the router switch.
-  if (hash === '#/__e2e/export-csv') {
-    return <ExportCsvButtonE2eFixture />;
-  }
 
   function handleNavLinkClick(e: React.MouseEvent, item: NavItem) {
     e.preventDefault();

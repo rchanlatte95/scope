@@ -71,16 +71,4 @@ $priv = [Convert]::ToBase64String($ec.ExportPkcs8PrivateKey())        # <- store
 ```
 
 The public string is base64 `SubjectPublicKeyInfo` (SPKI/DER), which the verifier imports via
-`ImportSubjectPublicKeyInfo`. A test asserts every pinned key imports as P-256.
-
-## End-to-end test vector
-
-A **prod-signed test vector** is committed: `Verify_ProductionSignedTestVector_IsAccepted` in
-`test/Scope.Tests/Entitlement/EntitlementTokenVerifierTests.cs` holds one entitlement-token
-envelope signed by the production private key and asserts it verifies against the pinned key.
-This proves end-to-end verification against the real key without the private key ever entering
-the repo (the envelope is a signed token, not a secret).
-
-**When you rotate the signing key, regenerate this vector** against the new private key (use the
-PowerShell snippet above to sign the same fixed Team payload) and replace the `vector` constant,
-or the test will fail once the old public key is dropped from the set.
+`ImportSubjectPublicKeyInfo`.

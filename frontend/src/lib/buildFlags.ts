@@ -18,17 +18,7 @@
 // omitting the variable or setting it to "true" / "1" / "" all produce the
 // external (default) build.
 //
-// Gated nav areas (PP-15 + T-2026-06-20-10):
-//   - context-packs      (internal/diagnostic surface)
-//   - security-controls  (SaaS-sensitive, not yet available)
-//   - audit-log          (SaaS-sensitive, not yet available)
-//   - org-uplink         (SaaS-sensitive, not yet available)
-//   - billing            (SaaS-sensitive, not yet available)
-//
-// In external builds:
-//   - All five are filtered from the nav rail.
-//   - Deep-links to gated routes fall through to Command (default), NOT to
-//     a "coming soon" page.
+// Deep-links to gated routes fall through to Command (default).
 //
 // GATED_AREAS and isAreaAvailable are exported as a stable contract for other
 // modules (e.g. CommandView's dead-link cleanup in Task A).
@@ -49,10 +39,6 @@ export const IS_EXTERNAL_BUILD: boolean =
 /**
  * The set of nav area route names that are hidden in external builds.
  *
- * These areas are either internal/diagnostic surfaces (context-packs) or
- * SaaS-sensitive areas not yet shipped (security-controls, audit-log,
- * org-uplink, billing).
- *
  * The values are RouteName strings from router.ts. The type is ReadonlySet<string>
  * here (not ReadonlySet<RouteName>) to avoid a circular import — router.ts imports
  * buildFlags.ts at runtime, so buildFlags.ts must not import router.ts at runtime.
@@ -62,13 +48,7 @@ export const IS_EXTERNAL_BUILD: boolean =
  * Contract: this name is stable — Task A (CommandView dead-link cleanup)
  * imports GATED_AREAS directly. Do not rename.
  */
-export const GATED_AREAS: ReadonlySet<string> = new Set([
-  'context-packs',
-  'security-controls',
-  'audit-log',
-  'org-uplink',
-  'billing',
-]);
+export const GATED_AREAS: ReadonlySet<string> = new Set(['audit-log']);
 
 /**
  * Returns true if the named area is available in the current build.

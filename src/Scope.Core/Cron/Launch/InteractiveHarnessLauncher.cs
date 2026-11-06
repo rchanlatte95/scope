@@ -217,7 +217,7 @@ public sealed class InteractiveHarnessLauncher
         // through the Scope OpenAI proxy without touching any env var. Claude wiring sets ExtraArgs to
         // null, leaving the passthrough byte-identical to the un-metered path.
         IReadOnlyList<string> effectiveArgs = proxyWiring?.ExtraArgs is { Count: > 0 } extraArgs
-            ? [..extraArgs, ..passthroughArgs]
+            ? [.. extraArgs, .. passthroughArgs]
             : passthroughArgs;
 
         // A Windows .cmd shim must be launched through cmd.exe with the caller owning quoting; a

@@ -4,7 +4,7 @@
 // react-hooks + react-refresh. Type-aware via projectService:true.
 // --max-warnings 0 enforced in the lint script (zero-warning policy).
 //
-// Applies to ALL files (src, tests, e2e) — no per-directory relaxation.
+// Applies to ALL files, with no per-directory relaxation.
 
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -19,16 +19,13 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
-      'coverage/**',
-      'playwright-report/**',
-      'test-results/**',
       'node_modules/**',
     ],
   },
 
   // ------------------------------------------------------------------
   // Base: typescript-eslint strict + stylistic (type-aware).
-  // Applies to all TS/TSX files including tests and e2e.
+  // Applies to all TS/TSX files.
   // ------------------------------------------------------------------
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -36,30 +33,16 @@ export default tseslint.config(
   // ------------------------------------------------------------------
   // Language options + parser options for type-aware linting.
   // projectService discovers tsconfigs automatically.
-  // allowDefaultProject covers e2e/*.spec.ts and playwright.config.ts
-  // which are in tsconfig.e2e.json but may not be found by auto-discovery;
-  // these files get strict type-aware linting via the nearest tsconfig.
+  // allowDefaultProject covers this config file, which is outside tsconfig.json.
   // ------------------------------------------------------------------
   {
     languageOptions: {
       parserOptions: {
         projectService: {
           allowDefaultProject: [
-            'e2e/*.ts',
-            'e2e/helpers/*.ts',
-            'playwright.config.ts',
             'eslint.config.js',
           ],
-          defaultProject: './tsconfig.e2e.json',
-          // e2e spec files + shared helper + config files exceed the default limit of 8.
-          // Bump this when new e2e spec files are added. Wave 2b added csv-export-cost-surfaces.spec.ts
-          // and trace-viewstate.spec.ts (merge of T-16-16/ST-02 + T-16-18/ST-02); set with headroom.
-          // ST-04 (T-2026-06-16-14) added costLedgerTooltip.spec.ts.
-          // ST-03 (T-2026-06-16-18) added cost-ledger-viewstate.spec.ts.
-          // ST-04 (T-2026-06-16-18) added copy-link.spec.ts.
-          // T-14 (T-2026-06-20) added trace-summary-panel.spec.ts.
-          // T-2026-06-15-09 added trace-loading-skeleton.spec.ts.
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 53,
+          defaultProject: './tsconfig.node.json',
         },
         tsconfigRootDir: import.meta.dirname,
       },

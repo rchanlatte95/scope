@@ -188,6 +188,8 @@ public sealed class ControlPlaneEntitlementRefresher : IEntitlementRefresher
     /// Recommended base URL for the control-plane validate endpoint.
     /// Wired at call sites; overridable only via explicit constructor argument (never at runtime
     /// by env var / config, to prevent an attacker substituting a rogue endpoint).
+    /// The hosted control plane was never deployed, so this uses the reserved .invalid TLD
+    /// (RFC 2606), which can never resolve: refresh fails closed and no request leaves the machine.
     /// </summary>
     public const string DefaultBaseUrl = "https://control.scope.invalid";
 
@@ -378,55 +380,55 @@ public sealed class ControlPlaneEntitlementRefresher : IEntitlementRefresher
         switch (outcome.Status)
         {
             case EntitlementValidateStatus.Ok:
-            {
-                // envelope must be present (transport already validated this, but belt-and-suspenders)
-                if (outcome.Envelope is not { Length: > 0 } envelope)
                 {
-                    Log.Warning("ControlPlaneEntitlementRefresher: 200 OK but envelope is empty; ignoring.");
-                    RecordFailure(now);
-                    return false;
+                    // envelope must be present (transport already validated this, but belt-and-suspenders)
+                    if (outcome.Envelope is not { Length: > 0 } envelope)
+                    {
+                        Log.Warning("ControlPlaneEntitlementRefresher: 200 OK but envelope is empty; ignoring.");
+                        RecordFailure(now);
+                        return false;
+                    }
+
+                    // Verify the envelope before persisting (A2: forged tokens must NEVER be written).
+                    var result = _verifier.Verify(envelope);
+                    if (!result.IsValid)
+                    {
+                        Log.Warning(
+                            "ControlPlaneEntitlementRefresher: 200 OK but envelope failed verification ({Reason}); " +
+                            "last-known-good token retained.",
+                            result.FailureReason);
+                        RecordFailure(now);
+                        return false;
+                    }
+
+                    // A2 compliant: only write after successful signature verification.
+                    // The resolver does NOT read FetchedAtUtc for grace (C-cite); grace is always
+                    // anchored on expires_at_utc from the signed token. A revoked-seat token carries
+                    // tier=free + limits=FreeTierDefaults; the resolver resolves to Free on next
+                    // GetState() call without any special handling here.
+                    bool wrote = _cachePath is not null
+                        ? EntitlementCache.TryWrite(_cachePath, envelope, now)
+                        : EntitlementCache.TryWrite(envelope, now);
+
+                    if (!wrote)
+                    {
+                        Log.Warning("ControlPlaneEntitlementRefresher: cache write failed; last-known-good retained.");
+                        RecordFailure(now);
+                        return false;
+                    }
+
+                    // Success: reset consecutive-failure counter.
+                    _consecutiveFailures = 0;
+                    _credentialStore.TryWriteRefreshState(new EntitlementRefreshState
+                    {
+                        LastAttemptUtc = now.ToString("o"),
+                        ConsecutiveFailures = 0,
+                    });
+                    Log.Information(
+                        "ControlPlaneEntitlementRefresher: token refreshed successfully (tier={Tier}).",
+                        result.Token!.Tier);
+                    return true;
                 }
-
-                // Verify the envelope before persisting (A2: forged tokens must NEVER be written).
-                var result = _verifier.Verify(envelope);
-                if (!result.IsValid)
-                {
-                    Log.Warning(
-                        "ControlPlaneEntitlementRefresher: 200 OK but envelope failed verification ({Reason}); " +
-                        "last-known-good token retained.",
-                        result.FailureReason);
-                    RecordFailure(now);
-                    return false;
-                }
-
-                // A2 compliant: only write after successful signature verification.
-                // The resolver does NOT read FetchedAtUtc for grace (C-cite); grace is always
-                // anchored on expires_at_utc from the signed token. A revoked-seat token carries
-                // tier=free + limits=FreeTierDefaults; the resolver resolves to Free on next
-                // GetState() call without any special handling here.
-                bool wrote = _cachePath is not null
-                    ? EntitlementCache.TryWrite(_cachePath, envelope, now)
-                    : EntitlementCache.TryWrite(envelope, now);
-
-                if (!wrote)
-                {
-                    Log.Warning("ControlPlaneEntitlementRefresher: cache write failed; last-known-good retained.");
-                    RecordFailure(now);
-                    return false;
-                }
-
-                // Success: reset consecutive-failure counter.
-                _consecutiveFailures = 0;
-                _credentialStore.TryWriteRefreshState(new EntitlementRefreshState
-                {
-                    LastAttemptUtc = now.ToString("o"),
-                    ConsecutiveFailures = 0,
-                });
-                Log.Information(
-                    "ControlPlaneEntitlementRefresher: token refreshed successfully (tier={Tier}).",
-                    result.Token!.Tier);
-                return true;
-            }
 
             case EntitlementValidateStatus.BadCredential:
                 // 401: the credential is rejected by the server. Keep the existing token governing

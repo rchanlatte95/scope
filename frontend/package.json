@@ -8,9 +8,6 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run",
-    "e2e": "playwright test",
-    "test:e2e": "playwright test",
     "check": "npm run typecheck && npm run lint",
     "build:app": "vite build",
     "build": "npm run check && npm run build:app",
@@ -30,8 +27,6 @@
     "use-debounce": "^10.1.1"
   },
   "devDependencies": {
-    "@evilmartians/lefthook": "^2.1.9",
-    "@playwright/test": "1.60.0",
     "@tanstack/react-query-devtools": "^5.101.0",
     "@types/papaparse": "^5.5.2",
     "@types/react": "19.2.17",
@@ -43,7 +38,6 @@
     "globals": "^17.6.0",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.61.0",
-    "vite": "8.0.16",
-    "vitest": "3.2.6"
+    "vite": "8.0.16"
   }
 }
