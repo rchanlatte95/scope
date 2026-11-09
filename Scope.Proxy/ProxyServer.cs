@@ -22,15 +22,15 @@ internal sealed record ProxyServerOptions
 
     /// <summary>
     /// Upstream provider key. <c>"anthropic"</c> (default) routes /v1/messages and meters
-    /// with <see cref="AnthropicWireMeter"/>. <c>"openai"</c> routes /v1/responses via the
-    /// Phase-A <see cref="OpenAiResponsesMeter"/> capture stub (no wire_calls rows yet).
+    /// with <see cref="AnthropicWireMeter"/>. <c>"openai"</c> routes /v1/responses and meters
+    /// with <see cref="OpenAiResponsesMeter"/>. Both write wire_calls rows.
     /// </summary>
     public string Provider { get; init; } = "anthropic";
 
     /// <summary>
-    /// When set, the OpenAI capture meter appends every proxied /v1/responses body to this
-    /// file (one labeled block per round-trip, streaming and non-streaming). Used to collect
-    /// real Codex traffic for Phase B fixture recording. Ignored for provider != "openai".
+    /// When set, the OpenAI meter also appends every proxied /v1/responses body to this
+    /// file (one labeled block per round-trip, streaming and non-streaming), for inspecting
+    /// real Codex traffic. Ignored for provider != "openai".
     /// Also settable via the <c>SCOPE_PROXY_CAPTURE_FILE</c> environment variable.
     /// </summary>
     public string? CaptureFilePath { get; init; }

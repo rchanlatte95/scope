@@ -15,9 +15,9 @@ using System.Security.Cryptography;
 //               [--capture-file <path>]
 //
 // --provider anthropic  (default) meters /v1/messages and writes wire_calls rows.
-// --provider openai     routes /v1/responses; Phase A capture stub only (no wire_calls
-//                       rows yet). Use --capture-file or SCOPE_PROXY_CAPTURE_FILE to tee
-//                       raw response bodies to disk for Phase B fixture recording.
+// --provider openai     meters /v1/responses and writes wire_calls rows. Use
+//                       --capture-file or SCOPE_PROXY_CAPTURE_FILE to also tee raw
+//                       response bodies to disk.
 //
 // The per-start token also comes from SCOPE_PROXY_TOKEN (set by the launcher so
 // supervised restarts keep the child's ANTHROPIC_BASE_URL valid); when absent a

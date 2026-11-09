@@ -16,7 +16,7 @@ using static Scope.Core.Telemetry.Trace.TraceProjection;
 /// (the task = a top-level-span subtree). Because every cost-bearing row is attributed to exactly one
 /// task by the rollup, and this primitive distributes each task's single cost number across that task's
 /// own rows without remainder, <c>SUM(per-row cost) == SUM(by_task cost) == totals.cost</c> exactly
-/// (no rounding divergence: it is the same doubles, only redistributed). The rollup's
+/// (no rounding divergence: the split runs in exact decimal and the last row takes the remainder). The rollup's
 /// <see cref="RollupBody.Unattributed"/> remainder carries a null cost and contributes nothing, exactly
 /// as it does to the totals.
 /// </para>

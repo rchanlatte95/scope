@@ -41,7 +41,7 @@ npm run build:app
 
 ## Cost you can audit
 
-Every dollar figure in the UI carries its provenance: wire exact, provider estimate, or Scope estimate. An unknown cost renders as unknown, never as `$0.00`.
+Dollar figures in the UI carry their provenance: wire exact, provider estimate, or Scope estimate. An unknown cost renders as unknown, never as `$0.00`.
 
 ![Cost Ledger: total spend with a provenance breakdown showing how much is wire exact versus estimated](docs/screenshots/cost-ledger.png)
 
